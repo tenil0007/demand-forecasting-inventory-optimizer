@@ -1,0 +1,113 @@
+{
+  "test_period": [
+    "2026-06-18",
+    "2026-08-17"
+  ],
+  "n_skus_tested": 10,
+  "naive_policy": {
+    "stockout_days": "8",
+    "lost_sales": 11559.02,
+    "holding_cost": 1704.56,
+    "order_cost": 10650.0
+  },
+  "agent_policy": {
+    "stockout_days": "6",
+    "lost_sales": 11432.3,
+    "holding_cost": 8449.36,
+    "order_cost": 2900.0
+  },
+  "total_savings": 1131.91,
+  "stockout_reduction_pct": 25.0,
+  "sku_results": [
+    {
+      "store_id": "S002",
+      "product_id": "P006",
+      "naive_stockout_days": "0",
+      "agent_stockout_days": "0",
+      "naive_total_cost": 1186.8723178082191,
+      "agent_total_cost": 770.6731494025164,
+      "savings": 416.1991684057027
+    },
+    {
+      "store_id": "S003",
+      "product_id": "P005",
+      "naive_stockout_days": "2",
+      "agent_stockout_days": "0",
+      "naive_total_cost": 1280.4892383561644,
+      "agent_total_cost": 563.9520569987974,
+      "savings": 716.537181357367
+    },
+    {
+      "store_id": "S004",
+      "product_id": "P010",
+      "naive_stockout_days": "0",
+      "agent_stockout_days": "0",
+      "naive_total_cost": 1141.3424821917808,
+      "agent_total_cost": 473.0667578771019,
+      "savings": 668.2757243146789
+    },
+    {
+      "store_id": "S002",
+      "product_id": "P005",
+      "naive_stockout_days": "0",
+      "agent_stockout_days": "0",
+      "naive_total_cost": 1099.6244273972602,
+      "agent_total_cost": 526.1084198582871,
+      "savings": 573.5160075389731
+    },
+    {
+      "store_id": "S005",
+      "product_id": "P001",
+      "naive_stockout_days": "1",
+      "agent_stockout_days": "1",
+      "naive_total_cost": 1769.6314520547944,
+      "agent_total_cost": 1293.4932121982172,
+      "savings": 476.13823985657723
+    },
+    {
+      "store_id": "S002",
+      "product_id": "P010",
+      "naive_stockout_days": "1",
+      "agent_stockout_days": "1",
+      "naive_total_cost": 2096.831616438356,
+      "agent_total_cost": 1793.606186765688,
+      "savings": 303.2254296726678
+    },
+    {
+      "store_id": "S002",
+      "product_id": "P001",
+      "naive_stockout_days": "1",
+      "agent_stockout_days": "1",
+      "naive_total_cost": 3445.944531506849,
+      "agent_total_cost": 4044.3346459494387,
+      "savings": -598.3901144425895
+    },
+    {
+      "store_id": "S003",
+      "product_id": "P010",
+      "naive_stockout_days": "1",
+      "agent_stockout_days": "1",
+      "naive_total_cost": 5102.889008219177,
+      "agent_total_cost": 5959.790226500161,
+      "savings": -856.9012182809838
+    },
+    {
+      "store_id": "S005",
+      "product_id": "P006",
+      "naive_stockout_days": "1",
+      "agent_stockout_days": "1",
+      "naive_total_cost": 3440.015068493151,
+      "agent_total_cost": 3624.2347847727942,
+      "savings": -184.2197162796433
+    },
+    {
+      "store_id": "S005",
+      "product_id": "P010",
+      "naive_stockout_days": "1",
+      "agent_stockout_days": "1",
+      "naive_total_cost": 3349.9367945205477,
+      "agent_total_cost": 3732.4043253854275,
+      "savings": -382.4675308648798
+    }
+  ]
+}

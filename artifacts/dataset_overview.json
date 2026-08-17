@@ -1,0 +1,55 @@
+{
+  "shape": [
+    9000,
+    16
+  ],
+  "date_range": [
+    "2026-02-19",
+    "2026-08-17"
+  ],
+  "n_stores": 5,
+  "n_products": 10,
+  "n_categories": 5,
+  "categories": [
+    "Groceries",
+    "Apparel",
+    "Electronics",
+    "Health & Beauty",
+    "Home & Kitchen"
+  ],
+  "n_regions": 5,
+  "regions": [
+    "North",
+    "South",
+    "Central",
+    "East",
+    "West"
+  ],
+  "columns": [
+    "Date",
+    "Store ID",
+    "Product ID",
+    "Category",
+    "Region",
+    "Inventory Level",
+    "Units Sold",
+    "Units Ordered",
+    "Price",
+    "Discount",
+    "Weather Condition",
+    "Promotion",
+    "Competitor Pricing",
+    "Seasonality",
+    "Epidemic",
+    "Demand"
+  ],
+  "findings": [
+    "Demand-Sales gap: 36.3% of demand goes unfulfilled (potential stockout indicator)",
+    "Top demand category: Health & Beauty",
+    "Price-Demand correlation: -0.054 | Discount-Demand correlation: 0.232",
+    "[KEY FINDING] Epidemic demand shift: +2.6% vs normal periods",
+    "Potential stockout events (inventory < 10 units): 2968 records (33.0%)",
+    "Promotion demand lift: +39.3%",
+    "Highest demand season: Winter"
+  ]
+}
