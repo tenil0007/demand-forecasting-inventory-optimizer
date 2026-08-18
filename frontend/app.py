@@ -513,77 +513,6 @@ render_html("""
         color: #64748B;
     }
 
-    /* ── Dark Simulation Control Tower ────────────────────────────────────── */
-    .sim-tower {
-        background: #0F172A;
-        border-radius: 10px;
-        padding: 18px 22px;
-        color: #F1F5F9;
-        margin-bottom: 20px;
-    }
-    .sim-tower-label {
-        font-size: 10px;
-        font-weight: 600;
-        color: #94A3B8;
-        text-transform: uppercase;
-        letter-spacing: 0.08em;
-        margin-bottom: 10px;
-    }
-    .sim-tower-content {
-        display: flex;
-        align-items: center;
-        gap: 18px;
-    }
-    .sim-tower-day {
-        font-size: 17px;
-        font-family: 'SF Mono', monospace;
-        font-weight: 600;
-        color: #FFFFFF;
-        white-space: nowrap;
-    }
-    .sim-tower-progress {
-        flex: 1;
-        height: 8px;
-        background: #1E293B;
-        border-radius: 9999px;
-        overflow: hidden;
-    }
-    .sim-tower-progress-fill {
-        height: 100%;
-        background: #3B82F6;
-        border-radius: 9999px;
-    }
-    .sim-tower-stats {
-        display: flex;
-        gap: 20px;
-        border-left: 1px solid #334155;
-        padding-left: 20px;
-    }
-    .sim-tower-stat-label {
-        font-size: 10px;
-        color: #94A3B8;
-        text-transform: uppercase;
-        font-weight: 600;
-    }
-    .sim-tower-stat-value {
-        font-size: 18px;
-        font-weight: 700;
-        color: #FFFFFF;
-    }
-    .sim-tower-stat-value-red {
-        font-size: 18px;
-        font-weight: 700;
-        color: #F87171;
-    }
-
-    .live-dot {
-        display: inline-block;
-        width: 8px;
-        height: 8px;
-        border-radius: 50%;
-        background: #10B981;
-    }
-
     /* ── Info Box (blue) ──────────────────────────────────────────────────── */
     .info-box {
         display: flex;
@@ -801,7 +730,7 @@ ICON_INFO = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke=
 ICON_BOT = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></svg>'
 
 # ═════════════════════════════════════════════════════════════════════════════
-# SIDEBAR NAVIGATION
+# SIDEBAR NAVIGATION (5 Tabs)
 # ═════════════════════════════════════════════════════════════════════════════
 with st.sidebar:
     render_html(f'''
@@ -816,8 +745,7 @@ with st.sidebar:
         "🔮  Forecast Explorer",
         "📦  Replenishment",
         "💬  Agent Chat",
-        "🛡️  Audit Trail",
-        "📡  Live Telemetry"
+        "🛡️  Audit Trail"
     ]
     active_tab = st.radio("Navigation", nav_options, label_visibility="collapsed")
 
@@ -1328,91 +1256,3 @@ elif active_tab == nav_options[4]:
 </table>
 </div>"""
     render_html(audit_html)
-
-# ═════════════════════════════════════════════════════════════════════════════
-# TAB 6: LIVE TELEMETRY
-# ═════════════════════════════════════════════════════════════════════════════
-elif active_tab == nav_options[5]:
-    if "sim_day" not in st.session_state:
-        st.session_state.sim_day = 4
-
-    day_num = st.session_state.sim_day
-    prog_pct = int((day_num / 30) * 100)
-
-    render_html(f'''
-    <div class="sim-tower">
-        <div class="sim-tower-label">Simulation Control Tower</div>
-        <div class="sim-tower-content">
-            <div class="sim-tower-day">Day {day_num} of 30</div>
-            <div class="sim-tower-progress">
-                <div class="sim-tower-progress-fill" style="width: {prog_pct}%;"></div>
-            </div>
-            <div class="sim-tower-stats">
-                <div>
-                    <div class="sim-tower-stat-label">Live Alerts</div>
-                    <div class="sim-tower-stat-value-red">2 Critical</div>
-                </div>
-                <div>
-                    <div class="sim-tower-stat-label">Daily Burn Rate</div>
-                    <div class="sim-tower-stat-value">14,290 U</div>
-                </div>
-            </div>
-        </div>
-    </div>
-    ''')
-
-    sc1, sc2, _ = st.columns([1, 1, 3])
-    with sc1:
-        if st.button("▶ Step +1 Day", type="primary", use_container_width=True):
-            st.session_state.sim_day = min(30, st.session_state.sim_day + 1)
-            st.rerun()
-    with sc2:
-        if st.button("⏮ Reset Simulation", use_container_width=True):
-            st.session_state.sim_day = 1
-            st.rerun()
-
-    live_telemetry_data = [
-        {'store': 'S001', 'sku': 'P042', 'velocity': 32, 'rop': 228, 'stock': 21, 'status': 'CRITICAL'},
-        {'store': 'S002', 'sku': 'P088', 'velocity': 15, 'rop': 105, 'stock': 110, 'status': 'WARNING'},
-        {'store': 'S004', 'sku': 'P112', 'velocity': 45, 'rop': 315, 'stock': 450, 'status': 'OPTIMAL'},
-        {'store': 'S005', 'sku': 'P019', 'velocity': 22, 'rop': 154, 'stock': 160, 'status': 'WARNING'},
-        {'store': 'S003', 'sku': 'P055', 'velocity': 18, 'rop': 126, 'stock': 200, 'status': 'OPTIMAL'},
-    ]
-
-    telem_rows = ""
-    for row in live_telemetry_data:
-        stock_class = "danger" if row['stock'] < row['rop'] else "bold"
-        status_var = {'CRITICAL': 'red', 'WARNING': 'amber', 'OPTIMAL': 'green'}.get(row['status'], 'gray')
-        telem_rows += f"""<tr>
-<td class="mono bold">{row['store']}</td>
-<td class="mono muted">{row['sku']}</td>
-<td class="mono">{row['velocity']}</td>
-<td class="mono muted">{row['rop']}</td>
-<td class="mono {stock_class}">{row['stock']}</td>
-<td><span class="badge badge-{status_var}">{row['status']}</span></td>
-</tr>"""
-
-    telem_html = f"""<div class="nexus-table-wrapper">
-<div class="nexus-table-header">
-<span style="font-weight: 600; font-size: 14px; color: #0F172A;">Live SKU Telemetry</span>
-<span style="display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: #059669;">
-<span class="live-dot"></span> Live Stream Connected
-</span>
-</div>
-<table class="nexus-table">
-<thead>
-<tr>
-<th>Store</th>
-<th>SKU</th>
-<th>Velocity (U/day)</th>
-<th>ROP Threshold</th>
-<th>Live Stock</th>
-<th>Status</th>
-</tr>
-</thead>
-<tbody>
-{telem_rows}
-</tbody>
-</table>
-</div>"""
-    render_html(telem_html)
