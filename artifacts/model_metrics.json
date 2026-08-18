@@ -1,4 +1,17 @@
 {
+    "xgboost": {
+        "MAPE": 0.18649596938852764,
+        "RMSE": 6.70863066848277,
+        "MAE": 5.1008916522610575,
+        "target": "Demand (Unconstrained)",
+        "features_count": 25
+    },
+    "prophet": {
+        "MAPE": 0.27302535467059974,
+        "RMSE": 409.26705989003267,
+        "MAE": 386.903611297132,
+        "model_type": "Prophet (Additive Seasonality/Trend)"
+    },
     "MAPE": 0.18649596938852764,
     "RMSE": 6.70863066848277,
     "MAE": 5.1008916522610575

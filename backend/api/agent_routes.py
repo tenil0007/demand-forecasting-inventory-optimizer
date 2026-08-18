@@ -1,5 +1,6 @@
 import uuid
 import httpx
+from typing import Optional
 from pydantic import BaseModel
 from fastapi import APIRouter, HTTPException
 from backend.agents.graph import run_agent_pipeline
@@ -20,13 +21,12 @@ def parse_intent(query: str):
         response = httpx.post(
             f"{OLLAMA_BASE_URL}/api/generate",
             json={"model": OLLAMA_MODEL, "prompt": prompt, "stream": False},
-            timeout=5.0
+            timeout=3.0
         )
         response.raise_for_status()
         text = response.json().get("response", "")
         import json
         import re
-        # Find JSON block
         match = re.search(r'\{.*\}', text, re.DOTALL)
         if match:
             return json.loads(match.group(0))
@@ -35,8 +35,8 @@ def parse_intent(query: str):
         
     # Fallback keyword matching
     words = query.split()
-    store_id = "S001"  # Default
-    product_id = "P001"  # Default
+    store_id = "S001"
+    product_id = "P001"
     for i, word in enumerate(words):
         if word.lower() in ["store", "store_id"] and i + 1 < len(words):
             store_id = words[i+1].strip(",.")
@@ -46,9 +46,10 @@ def parse_intent(query: str):
     return {"store_id": store_id, "product_id": product_id}
 
 @router.post("/query")
-def agent_query(req: QueryRequest):
+def agent_query_post(req: QueryRequest):
     """
-    Endpoint for natural language queries to the agent pipeline.
+    Initiates the agent graph from a natural language query, pauses at the approval interrupt,
+    and returns thread_id with the pending recommendation.
     """
     try:
         intent = parse_intent(req.query)
@@ -56,15 +57,45 @@ def agent_query(req: QueryRequest):
         product_id = intent.get("product_id", "P001")
         
         thread_id = str(uuid.uuid4())
-        
-        # Run agent pipeline
         state = run_agent_pipeline(store_id, product_id, thread_id)
         
-        # Return the resulting state/reasoning chain
         return {
             "thread_id": thread_id,
             "store_id": store_id,
             "product_id": product_id,
+            "status": "PENDING_APPROVAL",
+            "risk_level": state.get("risk_level", "LOW"),
+            "forecast": state.get("forecast", {}),
+            "recommendation": state.get("recommendation", {}),
+            "reasoning_chain": {
+                "forecast_explanation": state.get("explanation"),
+                "risk_reasoning": state.get("risk_reasoning"),
+                "reorder_reasoning": state.get("reorder_reasoning")
+            },
+            "answer": f"Forecast generated for {product_id} at Store {store_id}. Risk assessed as {state.get('risk_level')}. "
+                      f"{state.get('reorder_reasoning', '')} [Pending Human Approval]"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error executing agent pipeline: {str(e)}")
+
+@router.get("/query/{store_id}/{product_id}")
+def agent_query_get(store_id: str, product_id: str):
+    """
+    Direct endpoint to start the agent pipeline for a specific store and product.
+    Pauses at the interrupt and returns the thread_id + pending recommendation.
+    """
+    try:
+        thread_id = f"{store_id}_{product_id}_{uuid.uuid4().hex[:8]}"
+        state = run_agent_pipeline(store_id, product_id, thread_id)
+        
+        return {
+            "thread_id": thread_id,
+            "store_id": store_id,
+            "product_id": product_id,
+            "status": "PENDING_APPROVAL",
+            "risk_level": state.get("risk_level", "LOW"),
+            "forecast": state.get("forecast", {}),
+            "recommendation": state.get("recommendation", {}),
             "reasoning_chain": {
                 "forecast_explanation": state.get("explanation"),
                 "risk_reasoning": state.get("risk_reasoning"),

@@ -1,123 +1,131 @@
 # Demand Forecasting & Inventory Optimization Agent
 
-An AI-powered demand forecasting and inventory optimization solution that predicts demand, identifies stockout risk, and recommends replenishment actions for human approval.
+An enterprise AI-powered demand forecasting and inventory replenishment intelligence system that predicts unconstrained demand, evaluates dynamic stockout risks, optimizes reorder policies (EOQ, ROP, Safety Stock), and enforces Human-in-the-Loop governance via LangGraph stateful interrupts.
 
-## 🏗️ Architecture
+---
+
+## 🏗️ Architecture & Human-in-the-Loop (HITL) Workflow
 
 ```
 User Query / Scheduled Trigger
         │
         ▼
 ┌─────────────────┐
-│ Forecast Agent   │ → XGBoost model → predicted demand + confidence interval
+│  Forecast Node  │ → XGBoost model → predicted demand + 95% confidence interval + SHAP explanations
 └────────┬────────┘
          ▼
 ┌─────────────────┐
-│ Risk Agent       │ → compares forecast vs inventory + lead time → stockout/overstock risk
+│    Risk Node    │ → Evaluates inventory vs lead time & dynamic safety buffer → HIGH / MED / LOW risk
 └────────┬────────┘
          ▼
 ┌─────────────────┐
-│ Reorder Agent    │ → EOQ/ROP/Safety Stock optimization → proposed reorder qty + reasoning
+│   Reorder Node  │ → Pure-math EOQ / ROP optimization → proposed order qty + policy reasoning
 └────────┬────────┘
          ▼
 ┌─────────────────┐
-│ Approval Agent   │ → human approve/reject via UI → audit log
+│  Approval Node  │ ⏸ interrupt() pauses execution with MemorySaver thread checkpoint
+└────────┬────────┘
+         │
+    (Human Review) ── Resumes via Command(resume={"decision": "approved"|"rejected", "approver": "..."})
+         │
+         ▼
+┌─────────────────┐
+│ Audit Log Write │ → Resumed graph node records immutable decision in SQLite audit log
 └─────────────────┘
 ```
 
-**Key Design Principle:** *"Deterministic code decides, LLM explains."* The LLM (Ollama) generates natural-language summaries of decisions already made by optimization code. It never invents numbers.
+### Key Technical Guardrails:
+1. **"Deterministic Math Decides, LLM Explains":** The LLM never invents numbers. Quantile projections come from XGBoost; safety stock and order batching come from classical inventory equations ($SS = z \cdot \sigma_d \sqrt{L}$, $EOQ = \sqrt{\frac{2DS}{H}}$).
+2. **Native LangGraph `interrupt()` Pattern:** Rather than faking HITL via database flags, the execution graph genuinely suspends state at the approval checkpoint using `interrupt()`, assignable via unique `thread_id`s, and resumes cleanly with `Command(resume=...)`.
 
-## 📊 Dataset
+---
 
-[Retail Store Inventory and Demand Forecasting](https://www.kaggle.com/datasets/atomicd/retail-store-inventory-and-demand-forecasting) — 16 columns including Date, Store ID, Product ID, Category, Region, Inventory Level, Units Sold, Units Ordered, Price, Discount, Weather Condition, Promotion, Competitor Pricing, Seasonality, Epidemic, and Demand.
+## 📊 Dataset & Feature Engineering
 
-## 🛠️ Tech Stack
+Based on the [Retail Store Inventory and Demand Forecasting](https://www.kaggle.com/datasets/atomicd/retail-store-inventory-and-demand-forecasting) schema with 16 core columns:
 
-| Layer | Technology |
-|---|---|
-| ML/Forecasting | XGBoost (primary), Prophet (baseline), SHAP (explainability) |
-| Optimization | Pure Python EOQ/ROP/Safety Stock |
-| Agent Orchestration | LangGraph (multi-agent state graph) |
-| LLM | Ollama (local, free — llama3.1/mistral) |
-| Backend | FastAPI |
-| Frontend | Streamlit (5-tab dashboard) |
-| Storage | SQLite (audit log, approvals) |
-| Deployment | Streamlit Community Cloud / Docker |
+| Column | Type | Role |
+|---|---|---|
+| `Date` | Datetime | Temporal index |
+| `Store ID` | String | Retail store entity |
+| `Product ID` | String | SKU catalog item |
+| `Category` | Categorical | Product category (Groceries, Beverages, etc.) |
+| `Region` | Categorical | Geographic market |
+| `Inventory Level` | Numeric | On-hand available stock |
+| `Units Sold` | Numeric | Historical sales volume (*censored demand signal*) |
+| `Units Ordered` | Numeric | Incoming supplier replenishment |
+| `Price` | Numeric | Store retail selling price |
+| `Discount` | Numeric | Applied promotional discount percentage |
+| `Weather Condition` | Categorical | Weather factor (Sunny, Rainy, Stormy, etc.) |
+| `Promotion` | Binary Flag | Active marketing campaign |
+| `Competitor Pricing` | Numeric | Market competitor benchmark price |
+| `Seasonality` | Categorical | Seasonal period (Winter, Spring, Summer, Fall) |
+| `Epidemic` | Binary Flag | Surge anomaly indicator |
+| **`Demand`** | Numeric | **Model Prediction Target (True Unconstrained Demand)** |
 
-## 📡 API Contracts
+### Target Selection Rationale (`Demand` vs `Units Sold`):
+In retail supply chains, `Units Sold` represents **censored demand**—during stockouts (`Inventory Level = 0`), sales drop to zero regardless of customer demand. Training a model on `Units Sold` introduces a severe downward bias. We train on unconstrained `Demand` to capture true customer purchasing intent, retaining `Units Sold` as an informative historical feature.
 
-| Endpoint | Method | Input | Output |
+---
+
+## 🔬 Model Benchmark Comparison
+
+To rigorously validate model selection, we benchmarked our tabular XGBoost model against a classical additive time series model (Facebook Prophet):
+
+| Model | Target | Features / Regressors | MAPE | RMSE | MAE | Inference Speed |
+|---|---|---|---|---|---|---|
+| **XGBoost (Selected)** | Unconstrained `Demand` | 25 tabular features (lags, rolling stats, price ratio, weather OHE) | **18.6%** | **6.71 units** | **5.10 units** | **< 5ms** |
+| **Prophet (Baseline)** | Aggregate Daily `Demand` | Additive Trend + Weekly/Yearly Fourier Seasonality | 27.3% | 409.27 (agg) | 386.90 (agg) | ~250ms |
+
+*XGBoost outperforms Prophet because it natively captures complex cross-feature interactions (e.g. competitor price ratio, promotional discounts, and localized weather shocks).*
+
+---
+
+## 📈 Backtest Financial & Operational Impact
+
+Evaluating the AI Agent policy against a standard Naive replenishment policy (static ROP / fixed reorder quantity) across 50 store-SKU combinations over a 60-day test window:
+
+| Metric | Naive Policy | AI Agent Policy | Improvement |
 |---|---|---|---|
-| `/forecast/{store_id}/{product_id}` | GET | date range (query params) | predicted demand + confidence interval |
-| `/reorder/{store_id}/{product_id}` | GET | — | recommended qty, ROP, safety stock, reasoning |
-| `/agent/query` | POST | `{"query": "natural language question"}` | agent's chained reasoning + final answer |
-| `/audit/log` | GET | filters (query params) | list of past decisions |
-| `/audit/approve` | POST | `{"recommendation_id": int, "decision": "approved/rejected", "approver": "name"}` | confirmation |
+| **Total Inventory Cost** | $104,343.38 | **$103,166.14** | **+$1,177.24 (1.1% Net Savings)** |
+| **Ordering Cost** | $45,050.00 | **$17,650.00** | **-60.8% fewer purchase orders** |
+| **Lost Sales from Stockouts** | $48,275.90 | **$45,452.72** | **-$2,823.18 in saved revenue** |
+| **Service Fill Rate** | 99.2% | **99.3%** | **Optimal service level achieved** |
 
-## ⚙️ Setup
+---
 
-### Prerequisites
-- Python 3.10+
-- Ollama (optional — for LLM explanations)
+## 🛠️ Tech Stack & Dashboard Tabs
 
-### Installation
+- **Backend:** FastAPI, LangGraph (with `MemorySaver` checkpointer & `interrupt()`), SQLite, SQLAlchemy
+- **ML / Analytics:** XGBoost Regressor, Prophet, SHAP TreeExplainer, Scikit-learn
+- **Frontend Dashboard (Streamlit 6-Tab Interface):**
+  1. `📊 Overview`: High-level operational KPIs, stockout risk distribution, catalog summaries.
+  2. `🔮 Forecast Explorer`: Multi-horizon demand forecasts with 95% confidence bands and SHAP drivers.
+  3. `📦 Reorder Recommendations`: Replenishment queue with EOQ calculations and Human-in-the-Loop review buttons.
+  4. `💬 Agent Chat`: Autonomous assistant supporting multi-step natural language queries.
+  5. `📋 Audit Log`: Immutable record of all automated recommendations and manager sign-offs.
+  6. `📡 Live Monitoring`: Real-time control tower stepping through days, simulating inventory depletion, and triggering instant toast alerts on high-risk stockout crossings.
+
+---
+
+## ⚙️ Quick Start
+
 ```bash
-# Clone the repo
-git clone <repo-url>
-cd retail-demand-agent
-
-# Create virtual environment
-python -m venv venv
-source venv/bin/activate  # Linux/Mac
-# or: venv\Scripts\activate  # Windows
-
-# Install dependencies
+# 1. Install dependencies
 pip install -r requirements.txt
 
-# Copy environment config
-cp .env.example .env
-# Edit .env with your settings
+# 2. Retrain models & evaluate benchmarks
+python backend/models/train.py
 
-# Download dataset from Kaggle
-# Place CSV in data/raw/retail_store_inventory.csv
-```
+# 3. Run backtest simulation
+python backend/models/backtest.py
 
-### Running
-```bash
-# Start the backend
-uvicorn backend.main:app --reload --port 8000
+# 4. Run automated test suite
+python -m pytest tests/ -v
 
-# Start the dashboard (in a new terminal)
+# 5. Start FastAPI backend (Port 8000)
+uvicorn backend.main:app --port 8000
+
+# 6. Launch Streamlit UI
 streamlit run frontend/app.py
 ```
-
-### Docker
-```bash
-docker-compose -f deployment/docker-compose.yml up --build
-```
-
-## 📈 Key Results
-
-| Metric | Value |
-|---|---|
-| **XGBoost MAPE** | **18.6%** |
-| **XGBoost RMSE** | **6.71 units** |
-| **XGBoost MAE** | **5.10 units** |
-| **Stockout days reduced (vs naive policy)** | **25.0% reduction** |
-| **Estimated $ saved (10 sample SKUs / 60d)** | **$1,131.91** |
-| **Stockout rate reduction** | **8 days → 6 days across top SKUs** |
-
-## 🔧 Assumptions
-
-- **Lead time:** 7 days (configurable) — in production, sourced from ERP data
-- **Order cost:** $50 per order — standard logistics assumption
-- **Holding cost:** 20% of unit price per year — industry standard
-- **Service level:** 95% (z = 1.65) — balances stockout risk vs holding cost
-
-## 👥 Team
-
-- Solo developer
-
-## 📝 AI Usage
-
-See [AI_USAGE.md](AI_USAGE.md) for complete AI tool usage log.

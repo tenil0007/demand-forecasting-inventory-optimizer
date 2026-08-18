@@ -337,12 +337,13 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ── Primary Navigation Tabs ───────────────────────────────────────────────────
-tab1, tab2, tab3, tab4, tab5 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
     "📊 Overview", 
     "🔮 Forecast Explorer", 
     "📦 Reorder Recommendations", 
     "💬 Agent Chat", 
-    "📋 Audit Log"
+    "📋 Audit Log",
+    "📡 Live Monitoring"
 ])
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -910,3 +911,180 @@ with tab5:
             )
     else:
         st.info("Audit log is currently empty.")
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TAB 6: LIVE MONITORING & ALERTS
+# ─────────────────────────────────────────────────────────────────────────────
+with tab6:
+    st.markdown("### Real-Time Telemetry & Risk Monitoring Control Tower")
+    st.caption("Simulates day-by-day inventory arrivals and consumption, triggering instant alerts when SKUs cross into HIGH risk.")
+    
+    if not df.empty:
+        # Initialize simulation state
+        all_dates = sorted(df['date'].unique().tolist())
+        test_window_start_idx = max(0, len(all_dates) - 30)
+        
+        if "sim_day_idx" not in st.session_state:
+            st.session_state.sim_day_idx = test_window_start_idx
+            st.session_state.sim_alerts = []
+            
+        # Simulation Controls Bar
+        ctrl_col1, ctrl_col2, ctrl_col3, ctrl_col4 = st.columns([2, 1, 1, 2])
+        
+        current_sim_date = all_dates[min(st.session_state.sim_day_idx, len(all_dates) - 1)]
+        current_sim_date_str = str(pd.to_datetime(current_sim_date).date())
+        
+        with ctrl_col1:
+            st.markdown(f"**Current Simulation Date:** `{current_sim_date_str}` (Day {st.session_state.sim_day_idx - test_window_start_idx + 1} of {len(all_dates) - test_window_start_idx})")
+            
+        with ctrl_col2:
+            if st.button("▶ Step +1 Day", type="primary", use_container_width=True):
+                if st.session_state.sim_day_idx < len(all_dates) - 1:
+                    st.session_state.sim_day_idx += 1
+                else:
+                    st.info("Reached the end of available telemetry dates.")
+                    
+        with ctrl_col3:
+            if st.button("⏮ Reset Simulation", use_container_width=True):
+                st.session_state.sim_day_idx = test_window_start_idx
+                st.session_state.sim_alerts = []
+                st.rerun()
+                
+        with ctrl_col4:
+            auto_step = st.slider("Jump to Day Index", min_value=test_window_start_idx, max_value=len(all_dates) - 1, value=st.session_state.sim_day_idx, key="day_slider")
+            if auto_step != st.session_state.sim_day_idx:
+                st.session_state.sim_day_idx = auto_step
+                st.rerun()
+
+        # Compute dynamic snapshot up to simulated day
+        sim_df = df[df['date'] <= current_sim_date].copy()
+        current_day_data = df[df['date'] == current_sim_date].copy()
+        
+        # Calculate dynamic ROP and risk per SKU on this day
+        live_rows = []
+        new_high_alerts = []
+        
+        for (s, p), grp in sim_df.groupby(['store_id', 'product_id']):
+            latest = grp.iloc[-1]
+            inv = float(latest['inventory_level'])
+            price = float(latest['price'])
+            
+            recent_demand = grp['demand'].tail(14)
+            avg_d = float(recent_demand.mean()) if not recent_demand.empty else 20.0
+            std_d = float(recent_demand.std()) if len(recent_demand) > 1 else avg_d * 0.2
+            
+            ss = 1.65 * std_d * (7 ** 0.5)
+            rop = (avg_d * 7) + ss
+            eoq = np.sqrt((2 * (avg_d * 365) * 50.0) / max(price * 0.20, 0.5))
+            
+            if inv < rop:
+                risk = "HIGH"
+                status_icon = "🔴 HIGH ALERT"
+                new_high_alerts.append(f"Store {s} - SKU {p} (Stock: {inv:.0f} < ROP: {rop:.1f})")
+            elif inv < (rop * 1.20):
+                risk = "MEDIUM"
+                status_icon = "🟡 BUFFER WARN"
+            else:
+                risk = "LOW"
+                status_icon = "🟢 OPTIMAL"
+                
+            live_rows.append({
+                "store_id": s,
+                "product_id": p,
+                "category": latest.get('category', 'N/A'),
+                "current_stock": int(inv),
+                "avg_daily_demand": round(avg_d, 1),
+                "reorder_point": round(rop, 1),
+                "safety_stock": round(ss, 1),
+                "recommended_eoq": int(round(eoq)),
+                "risk_level": risk,
+                "status": status_icon
+            })
+            
+        live_table = pd.DataFrame(live_rows)
+        
+        # Trigger toast notification if new HIGH risks detected
+        if new_high_alerts:
+            st.toast(f"⚠️ {len(new_high_alerts)} SKUs require immediate replenishment on {current_sim_date_str}!", icon="🚨")
+            
+        # Summary Live KPI Row
+        high_alerts_count = len(live_table[live_table['risk_level'] == 'HIGH'])
+        medium_alerts_count = len(live_table[live_table['risk_level'] == 'MEDIUM'])
+        total_live_skus = len(live_table)
+        safety_compliance = ((total_live_skus - high_alerts_count) / max(total_live_skus, 1)) * 100
+        
+        lk1, lk2, lk3, lk4 = st.columns(4)
+        with lk1:
+            st.markdown(f"""
+            <div class="kpi-card">
+                <div class="kpi-label">Active Critical Alerts</div>
+                <div class="kpi-value {'kpi-value-danger' if high_alerts_count > 0 else 'kpi-value-success'}">{high_alerts_count}</div>
+                <div class="kpi-subtext">SKUs below Reorder Point</div>
+            </div>
+            """, unsafe_allow_html=True)
+        with lk2:
+            st.markdown(f"""
+            <div class="kpi-card">
+                <div class="kpi-label">Buffer Warnings</div>
+                <div class="kpi-value kpi-value-warning">{medium_alerts_count}</div>
+                <div class="kpi-subtext">Approaching safety buffer</div>
+            </div>
+            """, unsafe_allow_html=True)
+        with lk3:
+            st.markdown(f"""
+            <div class="kpi-card">
+                <div class="kpi-label">Service Level Compliance</div>
+                <div class="kpi-value kpi-value-primary">{safety_compliance:.1f}%</div>
+                <div class="kpi-subtext">Stockout avoidance target: 95%</div>
+            </div>
+            """, unsafe_allow_html=True)
+        with lk4:
+            today_units_sold = int(current_day_data['demand'].sum()) if not current_day_data.empty else 0
+            st.markdown(f"""
+            <div class="kpi-card">
+                <div class="kpi-label">Today's Total Demand</div>
+                <div class="kpi-value kpi-value-primary">{today_units_sold}</div>
+                <div class="kpi-subtext">Units consumed across network</div>
+            </div>
+            """, unsafe_allow_html=True)
+            
+        st.markdown("<div style='margin-top: 20px;'></div>", unsafe_allow_html=True)
+        
+        if high_alerts_count > 0:
+            st.error(f"🚨 **Action Required:** {high_alerts_count} SKUs have fallen below reorder thresholds. The Autonomous Replenishment Agent has generated restock orders ready for approval in Tab 3.")
+        else:
+            st.success("✅ **All Systems Normal:** Network inventory levels are healthy across all active store locations.")
+            
+        # Telemetry Data Table
+        st.markdown("#### Live Network SKU Inventory Telemetry")
+        t_col1, t_col2 = st.columns([1, 2])
+        with t_col1:
+            sel_risk_filter = st.selectbox("Telemetry View Filter:", ["Show All SKUs", "High Risk Only (Critical)", "Medium & High Risk"], index=0)
+            
+        filtered_live = live_table.copy()
+        if sel_risk_filter == "High Risk Only (Critical)":
+            filtered_live = filtered_live[filtered_live['risk_level'] == 'HIGH']
+        elif sel_risk_filter == "Medium & High Risk":
+            filtered_live = filtered_live[filtered_live['risk_level'].isin(['HIGH', 'MEDIUM'])]
+            
+        live_col_names = {
+            "store_id": "Store",
+            "product_id": "Product SKU",
+            "category": "Category",
+            "current_stock": "Current Stock",
+            "avg_daily_demand": "Daily Demand Velocity",
+            "reorder_point": "Reorder Point (ROP)",
+            "safety_stock": "Safety Stock",
+            "recommended_eoq": "EOQ Restock Qty",
+            "status": "Telemetry Status"
+        }
+        
+        with st.container(border=True):
+            st.dataframe(
+                filtered_live[list(live_col_names.keys())].rename(columns=live_col_names),
+                use_container_width=True,
+                height=320
+            )
+    else:
+        st.info("No telemetry dataset available for live simulation.")
+

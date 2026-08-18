@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, Dict, Any
 from typing_extensions import TypedDict
 from langgraph.graph import StateGraph, START, END
 from langgraph.checkpoint.memory import MemorySaver
@@ -9,24 +9,28 @@ from backend.agents.risk_agent import risk_node
 from backend.agents.reorder_agent import reorder_node
 from backend.agents.approval_agent import approval_node
 
-class AgentState(TypedDict):
+# NOTE: Using MemorySaver for thread-level state checkpointing.
+# In production with multiple worker processes, a persistent checkpointer 
+# like SqliteSaver or PostgresSaver should replace MemorySaver.
+memory = MemorySaver()
+
+class AgentState(TypedDict, total=False):
+    thread_id: Optional[str]
     store_id: str
     product_id: str
-    forecast: dict
+    forecast: Dict[str, Any]
     explanation: str
     risk_level: str
     risk_reasoning: str
-    recommendation: dict
+    recommendation: Dict[str, Any]
     reorder_reasoning: str
     approved: Optional[bool]
     approver: Optional[str]
+    decision: Optional[str]
     recommendation_id: Optional[int]
 
-# Initialize memory checkpointer
-memory = MemorySaver()
-
 def create_agent_graph():
-    """Build and compile the LangGraph agent pipeline."""
+    """Build and compile the LangGraph agent pipeline with MemorySaver checkpointer."""
     graph = StateGraph(AgentState)
 
     # Add nodes
@@ -42,7 +46,7 @@ def create_agent_graph():
     graph.add_edge("reorder_node", "approval_node")
     graph.add_edge("approval_node", END)
 
-    # Compile the graph
+    # Compile the graph with checkpointer
     return graph.compile(checkpointer=memory)
 
 # Global graph instance
@@ -51,9 +55,10 @@ agent_app = create_agent_graph()
 def run_agent_pipeline(store_id: str, product_id: str, thread_id: str):
     """
     Run the agent pipeline for a given store and product.
-    Pauses at the approval node via interrupt().
+    Executes through forecast, risk, and reorder nodes, then pauses at the approval node via interrupt().
     """
     initial_state = {
+        "thread_id": thread_id,
         "store_id": store_id,
         "product_id": product_id
     }
@@ -61,17 +66,18 @@ def run_agent_pipeline(store_id: str, product_id: str, thread_id: str):
     config = {"configurable": {"thread_id": thread_id}}
     
     try:
-        # Runs up to interrupt
-        state = agent_app.invoke(initial_state, config=config)
-        return state
+        # Runs up to interrupt in approval_node
+        agent_app.invoke(initial_state, config=config)
     except Exception:
-        # Retrieve snapshot values up to interrupt
-        current_snapshot = agent_app.get_state(config)
-        return current_snapshot.values if current_snapshot else initial_state
+        pass
+        
+    current_snapshot = agent_app.get_state(config)
+    return current_snapshot.values if current_snapshot and current_snapshot.values else initial_state
 
 def resume_agent(thread_id: str, decision: str, approver: str):
     """
-    Resume the agent pipeline with human approval decision.
+    Resume the agent pipeline with human approval/rejection decision.
+    Resumes from the exact interrupt point in approval_node.
     """
     config = {"configurable": {"thread_id": thread_id}}
     
@@ -83,4 +89,4 @@ def resume_agent(thread_id: str, decision: str, approver: str):
         return state
     except Exception:
         current_snapshot = agent_app.get_state(config)
-        return current_snapshot.values if current_snapshot else {}
+        return current_snapshot.values if current_snapshot and current_snapshot.values else {}

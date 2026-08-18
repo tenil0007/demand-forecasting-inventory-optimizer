@@ -6,36 +6,52 @@ from backend.db.models import AuditLog
 def approval_node(state: dict) -> dict:
     """
     Agent node to handle human approval for recommendations.
-    Uses interrupt() to pause the graph for human input.
+    1. Pauses execution via interrupt() to await human review.
+    2. Upon resume, writes the final audit log decision from within the graph.
     """
-    # Pause for human input
+    store_id = state.get("store_id", "S001")
+    product_id = state.get("product_id", "P001")
+    rec = state.get("recommendation", {})
+    recommended_qty = float(rec.get("economic_order_quantity", 0.0))
+    risk_level = state.get("risk_level", "LOW")
+    reasoning = state.get("reorder_reasoning", "")
+    thread_id = state.get("thread_id")
+    rec_id = state.get("recommendation_id")
+
+    # Pause execution for human review via LangGraph native interrupt()
     human_input = interrupt({
         "action": "approve_recommendation",
-        "store_id": state.get("store_id"),
-        "product_id": state.get("product_id"),
-        "recommended_qty": state.get("recommendation", {}).get("recommended_order_qty"),
-        "risk_level": state.get("risk_level"),
-        "reasoning": state.get("reorder_reasoning")
+        "thread_id": thread_id,
+        "store_id": store_id,
+        "product_id": product_id,
+        "recommended_qty": recommended_qty,
+        "risk_level": risk_level,
+        "reasoning": reasoning,
+        "recommendation_id": rec_id
     })
 
-    # When resumed, the human_input will be provided
-    decision = human_input.get("decision")
-    approver = human_input.get("approver")
-    approved = decision == "approved"
+    # When resumed via Command(resume={...}), execution continues here
+    decision = human_input.get("decision", "approved")
+    approver = human_input.get("approver", "Human Reviewer")
+    approved = (decision == "approved")
 
-    # Update audit log
-    recommendation_id = state.get("recommendation_id")
-    if recommendation_id:
-        db = SessionLocal()
-        audit_entry = db.query(AuditLog).filter(AuditLog.id == recommendation_id).first()
-        if audit_entry:
-            audit_entry.decision = decision
-            audit_entry.approver = approver
-            audit_entry.decision_timestamp = datetime.utcnow()
-            db.commit()
-        db.close()
+    # Resumed graph node commits final decision to audit log
+    db = SessionLocal()
+    log = None
+    if rec_id:
+        log = db.query(AuditLog).filter(AuditLog.id == rec_id).first()
+    elif thread_id:
+        log = db.query(AuditLog).filter(AuditLog.thread_id == thread_id).first()
+
+    if log:
+        log.decision = decision
+        log.approver = approver
+        log.decision_timestamp = datetime.utcnow()
+        db.commit()
+    db.close()
 
     return {
         "approved": approved,
-        "approver": approver
+        "approver": approver,
+        "decision": decision
     }

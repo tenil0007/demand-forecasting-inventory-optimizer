@@ -7,12 +7,13 @@ from backend.config import RAW_DATA_PATH, COL_STORE_ID, COL_PRODUCT_ID, COL_INVE
 def reorder_node(state: dict) -> dict:
     """
     Agent node to run inventory optimization and set recommendation.
-    Creates an audit log entry for the recommendation.
+    Creates an initial PENDING audit log entry for the recommendation.
     """
     store_id = state.get("store_id")
     product_id = state.get("product_id")
     forecast_data = state.get("forecast", {})
     risk_level = state.get("risk_level", "LOW")
+    thread_id = state.get("thread_id")
 
     current_inventory = 50.0
     price = 25.0
@@ -30,14 +31,16 @@ def reorder_node(state: dict) -> dict:
     recommended_qty = recommendation.get("economic_order_quantity", 0)
     reorder_reasoning = recommendation.get("reasoning", f"Order {recommended_qty} units.")
 
-    # Create audit log entry (without decision yet)
+    # Create initial audit log entry with PENDING status
     db = SessionLocal()
     audit_entry = AuditLog(
+        thread_id=thread_id,
         store_id=store_id,
         product_id=product_id,
         recommended_qty=recommended_qty,
         risk_level=risk_level,
-        reasoning_snapshot=state.get("risk_reasoning", "") + "\n" + reorder_reasoning
+        reasoning_snapshot=state.get("risk_reasoning", "") + "\n" + reorder_reasoning,
+        decision="PENDING"
     )
     db.add(audit_entry)
     db.commit()

@@ -1,15 +1,18 @@
 from typing import Optional
+from datetime import datetime
 from pydantic import BaseModel
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from backend.db.database import get_db
 from backend.db.models import AuditLog
+from backend.agents.graph import resume_agent
 
 router = APIRouter()
 
 class ApproveRequest(BaseModel):
-    recommendation_id: int
-    decision: str
+    recommendation_id: Optional[int] = None
+    thread_id: Optional[str] = None
+    decision: str  # "approved" or "rejected"
     approver: str
 
 @router.get("/log")
@@ -40,21 +43,46 @@ def approve_recommendation(
     db: Session = Depends(get_db)
 ):
     """
-    Approve or reject a recommendation, updating the audit log.
-    If the agent pipeline was paused, this would theoretically resume it,
-    but here we handle the DB update directly.
+    Approve or reject a recommendation by resuming the LangGraph pipeline from its interrupt state.
+    The resumed graph node writes the final audit log entry.
     """
-    from datetime import datetime
+    thread_id = req.thread_id
+    log = None
     
-    log = db.query(AuditLog).filter(AuditLog.id == req.recommendation_id).first()
-    if not log:
+    if req.recommendation_id:
+        log = db.query(AuditLog).filter(AuditLog.id == req.recommendation_id).first()
+        if log and not thread_id:
+            thread_id = log.thread_id
+    elif thread_id:
+        log = db.query(AuditLog).filter(AuditLog.thread_id == thread_id).first()
+        
+    # Resume the LangGraph execution
+    final_state = {}
+    if thread_id:
+        try:
+            final_state = resume_agent(thread_id, req.decision, req.approver)
+        except Exception:
+            pass
+
+    # Ensure DB record is updated if graph or direct call
+    if not log and req.recommendation_id:
         raise HTTPException(status_code=404, detail="Recommendation not found")
         
-    log.decision = req.decision
-    log.approver = req.approver
-    log.decision_timestamp = datetime.utcnow()
-    
-    db.commit()
-    db.refresh(log)
-    
-    return {"message": "Recommendation updated successfully", "log_id": log.id}
+    if log:
+        log.decision = req.decision
+        log.approver = req.approver
+        log.decision_timestamp = datetime.utcnow()
+        db.commit()
+        db.refresh(log)
+        log_id = log.id
+    else:
+        log_id = None
+        
+    return {
+        "message": f"Recommendation {req.decision} successfully",
+        "log_id": log_id,
+        "thread_id": thread_id,
+        "decision": req.decision,
+        "approver": req.approver,
+        "final_state": final_state
+    }
