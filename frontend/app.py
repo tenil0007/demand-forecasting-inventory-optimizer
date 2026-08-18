@@ -7,6 +7,7 @@ import json
 import os
 import sys
 import re
+import textwrap
 from datetime import datetime
 import numpy as np
 
@@ -45,8 +46,12 @@ except Exception:
 
 API_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
 
+def render_html(html_str: str):
+    """Renders HTML cleanly without leading markdown indentation causing code blocks."""
+    st.markdown(textwrap.dedent(html_str).strip(), unsafe_allow_html=True)
+
 # ── 2. NexusSupply Design System (CSS) ────────────────────────────────────────
-st.markdown("""
+render_html("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 
@@ -71,7 +76,7 @@ st.markdown("""
         max-width: 1400px !important;
     }
 
-    /* ── Native Bordered Container Styling (Replaces empty markup capsules) ── */
+    /* ── Native Bordered Container Styling ── */
     [data-testid="stVerticalBlockBorderWrapper"] {
         background-color: #FFFFFF !important;
         border: 1px solid #E2E8F0 !important;
@@ -113,33 +118,50 @@ st.markdown("""
         color: #0F172A;
     }
 
-    [data-testid="stSidebar"] .stRadio > div {
+    /* Hide Radio Circles in all Streamlit versions */
+    [data-testid="stSidebar"] [data-testid="stRadio"] div[role="radiogroup"] > label > div:first-child,
+    [data-testid="stSidebar"] [data-testid="stRadio"] div[role="radiogroup"] > label span[data-testid="stWidgetLabel"],
+    [data-testid="stSidebar"] [data-testid="stRadio"] input[type="radio"],
+    [data-testid="stSidebar"] [data-testid="stRadio"] div[data-testid="stRadioButtonCustom"] {
+        display: none !important;
+    }
+
+    [data-testid="stSidebar"] [data-testid="stRadio"] div[role="radiogroup"] {
         gap: 4px !important;
     }
-    [data-testid="stSidebar"] .stRadio label {
-        padding: 10px 14px !important;
+
+    [data-testid="stSidebar"] [data-testid="stRadio"] div[role="radiogroup"] > label {
+        display: flex !important;
+        align-items: center !important;
+        padding: 9px 12px !important;
         border-radius: 8px !important;
-        font-size: 14px !important;
+        font-size: 13.5px !important;
         font-weight: 500 !important;
         color: #475569 !important;
         cursor: pointer !important;
         transition: all 0.15s ease !important;
         margin: 0 !important;
+        border: 1px solid transparent !important;
+        background-color: transparent !important;
     }
-    [data-testid="stSidebar"] .stRadio label:hover {
+
+    [data-testid="stSidebar"] [data-testid="stRadio"] div[role="radiogroup"] > label:hover {
         background-color: #F1F5F9 !important;
         color: #0F172A !important;
     }
-    [data-testid="stSidebar"] .stRadio label:has(input:checked) {
+
+    [data-testid="stSidebar"] [data-testid="stRadio"] div[role="radiogroup"] > label:has(input:checked),
+    [data-testid="stSidebar"] [data-testid="stRadio"] div[role="radiogroup"] > label[data-checked="true"] {
         background-color: #EFF6FF !important;
         color: #2563EB !important;
         font-weight: 600 !important;
+        border-color: #DBEAFE !important;
     }
-    [data-testid="stSidebar"] .stRadio input[type="radio"] {
-        display: none !important;
-    }
-    [data-testid="stSidebar"] .stRadio label > div:first-child {
-        display: none !important;
+
+    [data-testid="stSidebar"] [data-testid="stRadio"] div[role="radiogroup"] > label p {
+        margin: 0 !important;
+        font-size: 13.5px !important;
+        line-height: 1.4 !important;
     }
 
     .sidebar-user {
@@ -630,33 +652,6 @@ st.markdown("""
         color: #64748B;
     }
 
-    .alert-critical {
-        display: flex;
-        align-items: center;
-        gap: 10px;
-        padding: 12px 16px;
-        background: #FEF2F2;
-        border: 1px solid #FECACA;
-        border-radius: 8px;
-        color: #991B1B;
-        font-size: 13px;
-        font-weight: 500;
-        margin-bottom: 16px;
-    }
-    .alert-success {
-        display: flex;
-        align-items: center;
-        gap: 10px;
-        padding: 12px 16px;
-        background: #F0FDF4;
-        border: 1px solid #BBF7D0;
-        border-radius: 8px;
-        color: #166534;
-        font-size: 13px;
-        font-weight: 500;
-        margin-bottom: 16px;
-    }
-
     .donut-legend {
         display: flex;
         justify-content: center;
@@ -677,7 +672,7 @@ st.markdown("""
         border-radius: 50%;
     }
 </style>
-""", unsafe_allow_html=True)
+""")
 
 # ── 3. Data Ingestion & Optimization Logic ────────────────────────────────────
 @st.cache_data(ttl=300)
@@ -735,7 +730,7 @@ def fetch_metrics():
     return {"mape": 18.6, "rmse": 6.71, "mae": 5.10}
 
 def process_reorder_data(df):
-    """Calculates SKU-level replenishment recommendations and realistic risk status."""
+    """Calculates SKU-level replenishment recommendations and risk status."""
     if df.empty:
         return pd.DataFrame()
     
@@ -747,7 +742,7 @@ def process_reorder_data(df):
         'price': 'last'
     }).reset_index()
     
-    # Inventory policy: 7-day lead time, 95% service level
+    # Policy formulas
     summary['safety_stock'] = (summary['demand'] * 0.20 * (7 ** 0.5) * 1.65).round(1)
     summary['reorder_point'] = ((summary['demand'] * 3.5) + summary['safety_stock']).round(1)
     summary['forecasted_demand'] = (summary['demand'] * 7).round(1)
@@ -776,43 +771,12 @@ def process_reorder_data(df):
     summary['reasoning'] = summary.apply(
         lambda r: f"Current inventory ({r['inventory_level']:.0f} units) is below ROP ({r['reorder_point']:.1f}). Order {r['economic_order_qty']} units (EOQ) immediately to cover 7-day supplier lead time and maintain 95% service level."
         if r['risk_level'] == 'HIGH' else (
-            f"Inventory ({r['inventory_level']:.0f} units) is approaching safety buffer zone. Recommended precautionary restock: {r['recommended_qty']} units."
+            f"Inventory ({r['inventory_level']:.0f} units) is approaching safety buffer zone. Recommended restock: {r['recommended_qty']} units."
             if r['risk_level'] == 'MEDIUM' else
             f"Inventory level ({r['inventory_level']:.0f} units) is healthy and comfortably above safety threshold ({r['reorder_point']:.1f}). No action required."
         ), axis=1
     )
     return summary
-
-def get_audit_logs():
-    """Fetches audit trail from database or defaults."""
-    if BACKEND_AVAILABLE:
-        try:
-            db = SessionLocal()
-            logs = db.query(AuditLog).order_by(AuditLog.timestamp.desc()).all()
-            records = []
-            for l in logs:
-                records.append({
-                    "id": l.id,
-                    "timestamp": l.timestamp.strftime("%Y-%m-%d %H:%M:%S") if l.timestamp else "N/A",
-                    "store_id": l.store_id,
-                    "product_id": l.product_id,
-                    "recommended_qty": int(l.recommended_qty) if l.recommended_qty else 0,
-                    "risk_level": l.risk_level or "LOW",
-                    "decision_status": (l.decision or "PENDING").upper(),
-                    "approver": l.approver or "System Agent",
-                    "reasoning": l.reasoning_snapshot or ""
-                })
-            db.close()
-            if records:
-                return pd.DataFrame(records)
-        except Exception:
-            pass
-            
-    return pd.DataFrame([
-        {"id": 1, "timestamp": "10:42 AM UTC", "store_id": "S001", "product_id": "P042", "recommended_qty": 300, "risk_level": "HIGH", "decision_status": "APPROVED", "approver": "A. Chen", "reasoning": "Cover 7-day supplier lead time"},
-        {"id": 2, "timestamp": "09:15 AM UTC", "store_id": "S003", "product_id": "P105", "recommended_qty": 500, "risk_level": "HIGH", "decision_status": "PENDING", "approver": "System", "reasoning": "Projected promo surge"},
-        {"id": 3, "timestamp": "08:30 AM UTC", "store_id": "S002", "product_id": "P018", "recommended_qty": 150, "risk_level": "MEDIUM", "decision_status": "REJECTED", "approver": "M. Davis", "reasoning": "Manual holding adjustment"}
-    ])
 
 def risk_badge(level):
     variant = {'HIGH': 'red', 'MEDIUM': 'amber', 'LOW': 'green'}.get(level, 'gray')
@@ -827,7 +791,7 @@ df = load_data()
 reorder_df = process_reorder_data(df)
 metrics = fetch_metrics()
 
-# ── SVG Icons (from sample) ───────────────────────────────────────────────────
+# ── SVG Icons ─────────────────────────────────────────────────────────────────
 ICON_ACTIVITY = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>'
 ICON_PACKAGE = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16.5 9.4 7.55 4.24"/><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.29 7 12 12 20.71 7"/><line x1="12" y1="22" x2="12" y2="12"/></svg>'
 ICON_STORE = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m2 7 4.41-4.41A2 2 0 0 1 7.83 2h8.34a2 2 0 0 1 1.42.59L22 7"/><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><path d="M15 22v-4a2 2 0 0 0-2-2h-2a2 2 0 0 0-2 2v4"/><path d="M2 7h20"/><path d="M22 7v3a2 2 0 0 1-2 2a2.7 2.7 0 0 1-1.59-.63.7.7 0 0 0-.82 0A2.7 2.7 0 0 1 16 12a2.7 2.7 0 0 1-1.59-.63.7.7 0 0 0-.82 0A2.7 2.7 0 0 1 12 12a2.7 2.7 0 0 1-1.59-.63.7.7 0 0 0-.82 0A2.7 2.7 0 0 1 8 12a2.7 2.7 0 0 1-1.59-.63.7.7 0 0 0-.82 0A2.7 2.7 0 0 1 4 12a2 2 0 0 1-2-2V7"/></svg>'
@@ -835,18 +799,17 @@ ICON_ALERT = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke
 ICON_TRENDING = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>'
 ICON_INFO = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>'
 ICON_BOT = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></svg>'
-ICON_WARN = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#EF4444" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>'
 
 # ═════════════════════════════════════════════════════════════════════════════
 # SIDEBAR NAVIGATION
 # ═════════════════════════════════════════════════════════════════════════════
 with st.sidebar:
-    st.markdown(f'''
+    render_html(f'''
     <div class="sidebar-brand">
         <div class="sidebar-brand-icon">{ICON_ACTIVITY}</div>
         <div class="sidebar-brand-text">Nexus<span>Supply</span></div>
     </div>
-    ''', unsafe_allow_html=True)
+    ''')
 
     nav_options = [
         "📊  Network Pulse",
@@ -858,7 +821,7 @@ with st.sidebar:
     ]
     active_tab = st.radio("Navigation", nav_options, label_visibility="collapsed")
 
-    st.markdown('''
+    render_html('''
     <div class="sidebar-user">
         <div class="sidebar-user-avatar">AC</div>
         <div>
@@ -866,11 +829,11 @@ with st.sidebar:
             <div class="sidebar-user-role">Supply Chain Mgr</div>
         </div>
     </div>
-    ''', unsafe_allow_html=True)
+    ''')
 
 # ── Top Bar Header ────────────────────────────────────────────────────────────
 tab_label = active_tab.split("  ", 1)[1] if "  " in active_tab else active_tab
-st.markdown(f'''
+render_html(f'''
 <div class="page-header">
     <h1 class="page-header-title">{tab_label}</h1>
     <div class="system-status">
@@ -878,24 +841,17 @@ st.markdown(f'''
         Systems Operational
     </div>
 </div>
-''', unsafe_allow_html=True)
+''')
 
 # ═════════════════════════════════════════════════════════════════════════════
 # TAB 1: NETWORK PULSE
 # ═════════════════════════════════════════════════════════════════════════════
 if active_tab == nav_options[0]:
     if not df.empty:
-        total_products = int(df['product_id'].nunique())
-        total_stores = int(df['store_id'].nunique())
-        total_skus = max(total_products * total_stores, 1)
-        high_risk_count = int(len(reorder_df[reorder_df['risk_level'] == 'HIGH'])) if not reorder_df.empty else 0
-        risk_pct = (high_risk_count / total_skus) * 100
-        service_level = max(88.0, 100.0 - risk_pct)
-
         # ── KPI Cards ─────────────────────────────────────────────────────
         c1, c2, c3, c4 = st.columns(4)
         with c1:
-            st.markdown(f'''
+            render_html(f'''
             <div class="kpi-card">
                 <div class="kpi-card-header">
                     <span class="kpi-card-label">Active Catalog SKUs</span>
@@ -904,9 +860,9 @@ if active_tab == nav_options[0]:
                 <div class="kpi-card-value">12,450</div>
                 <div class="kpi-card-sub">Across 14 categories</div>
             </div>
-            ''', unsafe_allow_html=True)
+            ''')
         with c2:
-            st.markdown(f'''
+            render_html(f'''
             <div class="kpi-card">
                 <div class="kpi-card-header">
                     <span class="kpi-card-label">Monitored Store Network</span>
@@ -915,9 +871,9 @@ if active_tab == nav_options[0]:
                 <div class="kpi-card-value">342</div>
                 <div class="kpi-card-sub-muted">Active global locations</div>
             </div>
-            ''', unsafe_allow_html=True)
+            ''')
         with c3:
-            st.markdown(f'''
+            render_html(f'''
             <div class="kpi-card kpi-card-danger">
                 <div class="kpi-card-header">
                     <span class="kpi-card-label">High Stockout Risk SKUs</span>
@@ -928,9 +884,9 @@ if active_tab == nav_options[0]:
                     <span class="badge badge-red" style="margin-bottom: 3px;">1.1% of catalog</span>
                 </div>
             </div>
-            ''', unsafe_allow_html=True)
+            ''')
         with c4:
-            st.markdown(f'''
+            render_html(f'''
             <div class="kpi-card">
                 <div class="kpi-card-header">
                     <span class="kpi-card-label">Network Service Level</span>
@@ -941,7 +897,7 @@ if active_tab == nav_options[0]:
                     <span class="kpi-card-sub-muted" style="margin-bottom: 3px;">Target: 95.0%</span>
                 </div>
             </div>
-            ''', unsafe_allow_html=True)
+            ''')
 
         st.markdown("<div style='height: 12px;'></div>", unsafe_allow_html=True)
 
@@ -952,7 +908,6 @@ if active_tab == nav_options[0]:
             with st.container(border=True):
                 st.markdown('<div class="card-header-title">Risk Distribution</div>', unsafe_allow_html=True)
                 
-                # Sample distribution matching React design
                 risk_data = pd.DataFrame({
                     'Status': ['Optimal', 'Warning', 'Critical'],
                     'Value': [72, 18, 10],
@@ -969,13 +924,13 @@ if active_tab == nav_options[0]:
                 )
                 st.plotly_chart(fig_pie, use_container_width=True, config={'displayModeBar': False})
 
-                st.markdown('''
+                render_html('''
                 <div class="donut-legend">
                     <div class="donut-legend-item"><div class="donut-legend-dot" style="background: #10B981;"></div>Optimal (72%)</div>
                     <div class="donut-legend-item"><div class="donut-legend-dot" style="background: #F59E0B;"></div>Warning (18%)</div>
                     <div class="donut-legend-item"><div class="donut-legend-dot" style="background: #EF4444;"></div>Critical (10%)</div>
                 </div>
-                ''', unsafe_allow_html=True)
+                ''')
 
         with col_bar:
             with st.container(border=True):
@@ -999,7 +954,7 @@ if active_tab == nav_options[0]:
         # ── Forecasting Model Benchmark ───────────────────────────────────
         with st.container(border=True):
             st.markdown('<div class="card-header-title">Forecasting Model Benchmark</div>', unsafe_allow_html=True)
-            st.markdown(f'''
+            render_html(f'''
             <div class="benchmark-grid">
                 <div class="benchmark-card benchmark-card-primary">
                     <div class="benchmark-label benchmark-label-primary">Production Model</div>
@@ -1012,7 +967,7 @@ if active_tab == nav_options[0]:
                     <div class="benchmark-value benchmark-value-muted">27.3% <span class="benchmark-unit">MAPE</span></div>
                 </div>
             </div>
-            ''', unsafe_allow_html=True)
+            ''')
 
 # ═════════════════════════════════════════════════════════════════════════════
 # TAB 2: FORECAST EXPLORER
@@ -1045,7 +1000,6 @@ elif active_tab == nav_options[1]:
                 </div>
                 ''', unsafe_allow_html=True)
 
-                # Simulated 30-day projection matching React sample
                 days = list(range(-15, 15))
                 actuals = [200 + np.sin(i / 2) * 50 + np.random.uniform(-10, 10) if i < 0 else None for i in days]
                 preds = [200 + np.sin(i / 2) * 50 if i >= 0 else None for i in days]
@@ -1077,14 +1031,14 @@ elif active_tab == nav_options[1]:
                 )
                 st.plotly_chart(fig_fc, use_container_width=True, config={'displayModeBar': False})
 
-                st.markdown(f'''
+                render_html(f'''
                 <div class="info-box">
                     <div class="info-box-icon">{ICON_INFO}</div>
                     <div class="info-box-text">
                         <strong>Model Error Verified at {metrics["mape"]}% MAPE.</strong> Predictions accurate within ±{metrics["mae"]} units/day under 95% service-level assurance. The recent upward trend is strongly driven by an upcoming weekend promotion.
                     </div>
                 </div>
-                ''', unsafe_allow_html=True)
+                ''')
 
         with col_shap:
             with st.container(border=True):
@@ -1125,43 +1079,44 @@ elif active_tab == nav_options[2]:
     col_table, col_panel = st.columns([2, 1])
 
     with col_table:
-        table_html = '''
-        <div class="nexus-table-wrapper">
-            <div class="nexus-table-header">
-                <span style="font-weight: 600; font-size: 14px; color: #0F172A;">Replenishment Action Queue</span>
-                <div style="display: flex; gap: 6px;">
-                    <span class="badge badge-red">High Risk (2)</span>
-                    <span class="badge badge-amber" style="opacity: 0.6;">Med (1)</span>
-                    <span class="badge badge-green" style="opacity: 0.6;">Low (1)</span>
-                </div>
-            </div>
-            <table class="nexus-table">
-                <thead>
-                    <tr>
-                        <th>Store</th>
-                        <th>SKU</th>
-                        <th>Stock</th>
-                        <th>ROP</th>
-                        <th>EOQ (Rec)</th>
-                        <th>Risk</th>
-                    </tr>
-                </thead>
-                <tbody>
-        '''
+        rows_str = ""
         for r in replenishment_data:
             stock_class = "danger" if r['stock'] < r['rop'] else "bold"
-            table_html += f'''
-                <tr>
-                    <td class="bold">{r["store"]}</td>
-                    <td class="muted">{r["sku"]}</td>
-                    <td class="{stock_class}">{r["stock"]}</td>
-                    <td class="muted">{r["rop"]}</td>
-                    <td class="primary">+{r["eoq"]}</td>
-                    <td>{risk_badge(r["risk"])}</td>
-                </tr>
-            '''
-        table_html += '</tbody></table></div>'
-        st.markdown(table_html, unsafe_allow_html=True)
+            rows_str += f"""<tr>
+<td class="bold">{r['store']}</td>
+<td class="muted">{r['sku']}</td>
+<td class="{stock_class}">{r['stock']}</td>
+<td class="muted">{r['rop']}</td>
+<td class="primary">+{r['eoq']}</td>
+<td>{risk_badge(r['risk'])}</td>
+</tr>"""
+
+        table_html = f"""<div class="nexus-table-wrapper">
+<div class="nexus-table-header">
+<span style="font-weight: 600; font-size: 14px; color: #0F172A;">Replenishment Action Queue</span>
+<div style="display: flex; gap: 6px;">
+<span class="badge badge-red">High Risk (2)</span>
+<span class="badge badge-amber" style="opacity: 0.6;">Med (1)</span>
+<span class="badge badge-green" style="opacity: 0.6;">Low (1)</span>
+</div>
+</div>
+<table class="nexus-table">
+<thead>
+<tr>
+<th>Store</th>
+<th>SKU</th>
+<th>Stock</th>
+<th>ROP</th>
+<th>EOQ (Rec)</th>
+<th>Risk</th>
+</tr>
+</thead>
+<tbody>
+{rows_str}
+</tbody>
+</table>
+</div>"""
+        render_html(table_html)
 
     with col_panel:
         selected_sku_idx = st.selectbox(
@@ -1170,10 +1125,9 @@ elif active_tab == nav_options[2]:
             format_func=lambda i: f"{replenishment_data[i]['store']} • {replenishment_data[i]['sku']} ({replenishment_data[i]['risk']} RISK)"
         )
         target = replenishment_data[selected_sku_idx]
-
         stock_val_class = "hitl-stat-value-danger" if target['stock'] < target['rop'] else "hitl-stat-value"
 
-        st.markdown(f'''
+        render_html(f'''
         <div class="hitl-panel">
             <div class="hitl-panel-header">
                 <div class="hitl-panel-header-top">
@@ -1207,7 +1161,7 @@ elif active_tab == nav_options[2]:
                 </div>
             </div>
         </div>
-        ''', unsafe_allow_html=True)
+        ''')
 
         bcol1, bcol2 = st.columns(2)
         with bcol1:
@@ -1221,7 +1175,7 @@ elif active_tab == nav_options[2]:
 # TAB 4: AGENT CHAT
 # ═════════════════════════════════════════════════════════════════════════════
 elif active_tab == nav_options[3]:
-    st.markdown(f'''
+    render_html(f'''
     <div class="chat-header">
         <div class="chat-header-avatar">{ICON_BOT}</div>
         <div>
@@ -1229,7 +1183,7 @@ elif active_tab == nav_options[3]:
             <div class="chat-header-sub">Connected to LangGraph reasoning engine</div>
         </div>
     </div>
-    ''', unsafe_allow_html=True)
+    ''')
 
     if "chat_history" not in st.session_state:
         st.session_state.chat_history = [
@@ -1311,68 +1265,69 @@ elif active_tab == nav_options[4]:
 
     ak1, ak2, ak3, ak4 = st.columns(4)
     with ak1:
-        st.markdown('''
+        render_html('''
         <div class="kpi-card">
             <div class="kpi-card-label">Total Audit Events (30d)</div>
             <div class="kpi-card-value">4,192</div>
         </div>
-        ''', unsafe_allow_html=True)
+        ''')
     with ak2:
-        st.markdown('''
+        render_html('''
         <div class="kpi-card">
             <div class="kpi-card-label">Human Approval Rate</div>
             <div class="kpi-card-value text-emerald">92.4%</div>
         </div>
-        ''', unsafe_allow_html=True)
+        ''')
     with ak3:
-        st.markdown('''
+        render_html('''
         <div class="kpi-card">
             <div class="kpi-card-label">Pending Reviews</div>
             <div class="kpi-card-value text-amber">18</div>
         </div>
-        ''', unsafe_allow_html=True)
+        ''')
     with ak4:
-        st.markdown('''
+        render_html('''
         <div class="kpi-card">
             <div class="kpi-card-label">Rejected Proposals</div>
             <div class="kpi-card-value text-red">318</div>
         </div>
-        ''', unsafe_allow_html=True)
+        ''')
 
     st.markdown("<div style='height: 12px;'></div>", unsafe_allow_html=True)
 
-    audit_html = '''
-    <div class="nexus-table-wrapper">
-        <div class="nexus-table-header">
-            <span style="font-weight: 600; font-size: 14px; color: #0F172A;">Immutable Audit Log</span>
-        </div>
-        <table class="nexus-table">
-            <thead>
-                <tr>
-                    <th>Timestamp (UTC)</th>
-                    <th>Location / SKU</th>
-                    <th>Action</th>
-                    <th>Status</th>
-                    <th>Reviewer</th>
-                </tr>
-            </thead>
-            <tbody>
-    '''
+    audit_rows = ""
     for a in audit_logs:
-        audit_html += f'''
-            <tr>
-                <td class="muted">{a["time"]}</td>
-                <td>
-                    <div style="font-weight: 600;">{a["store"]}</div>
-                    <div style="font-size: 12px; color: #64748B;">{a["sku"]}</div>
-                </td>
-                <td>Order {a["units"]} units</td>
-                <td>{status_badge(a["status"])}</td>
-                <td style="color: #334155; font-weight: 500;">{a["reviewer"]}</td>
-            </tr>
-        '''
-    audit_html += '</tbody></table></div>'
-    st.markdown(audit_html, unsafe_allow_html=True)
+        audit_rows += f"""<tr>
+<td class="muted">{a['time']}</td>
+<td>
+<div style="font-weight: 600;">{a['store']}</div>
+<div style="font-size: 12px; color: #64748B;">{a['sku']}</div>
+</td>
+<td>Order {a['units']} units</td>
+<td>{status_badge(a['status'])}</td>
+<td style="color: #334155; font-weight: 500;">{a['reviewer']}</td>
+</tr>"""
+
+    audit_html = f"""<div class="nexus-table-wrapper">
+<div class="nexus-table-header">
+<span style="font-weight: 600; font-size: 14px; color: #0F172A;">Immutable Audit Log</span>
+</div>
+<table class="nexus-table">
+<thead>
+<tr>
+<th>Timestamp (UTC)</th>
+<th>Location / SKU</th>
+<th>Action</th>
+<th>Status</th>
+<th>Reviewer</th>
+</tr>
+</thead>
+<tbody>
+{audit_rows}
+</tbody>
+</table>
+</div>"""
+    render_html(audit_html)
 
 # ═════════════════════════════════════════════════════════════════════════════
 # TAB 6: LIVE TELEMETRY
@@ -1384,8 +1339,7 @@ elif active_tab == nav_options[5]:
     day_num = st.session_state.sim_day
     prog_pct = int((day_num / 30) * 100)
 
-    # Simulation Control Tower
-    st.markdown(f'''
+    render_html(f'''
     <div class="sim-tower">
         <div class="sim-tower-label">Simulation Control Tower</div>
         <div class="sim-tower-content">
@@ -1405,7 +1359,7 @@ elif active_tab == nav_options[5]:
             </div>
         </div>
     </div>
-    ''', unsafe_allow_html=True)
+    ''')
 
     sc1, sc2, _ = st.columns([1, 1, 3])
     with sc1:
@@ -1425,39 +1379,40 @@ elif active_tab == nav_options[5]:
         {'store': 'S003', 'sku': 'P055', 'velocity': 18, 'rop': 126, 'stock': 200, 'status': 'OPTIMAL'},
     ]
 
-    telem_html = '''
-    <div class="nexus-table-wrapper">
-        <div class="nexus-table-header">
-            <span style="font-weight: 600; font-size: 14px; color: #0F172A;">Live SKU Telemetry</span>
-            <span style="display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: #059669;">
-                <span class="live-dot"></span> Live Stream Connected
-            </span>
-        </div>
-        <table class="nexus-table">
-            <thead>
-                <tr>
-                    <th>Store</th>
-                    <th>SKU</th>
-                    <th>Velocity (U/day)</th>
-                    <th>ROP Threshold</th>
-                    <th>Live Stock</th>
-                    <th>Status</th>
-                </tr>
-            </thead>
-            <tbody>
-    '''
+    telem_rows = ""
     for row in live_telemetry_data:
         stock_class = "danger" if row['stock'] < row['rop'] else "bold"
         status_var = {'CRITICAL': 'red', 'WARNING': 'amber', 'OPTIMAL': 'green'}.get(row['status'], 'gray')
-        telem_html += f'''
-            <tr>
-                <td class="mono bold">{row["store"]}</td>
-                <td class="mono muted">{row["sku"]}</td>
-                <td class="mono">{row["velocity"]}</td>
-                <td class="mono muted">{row["rop"]}</td>
-                <td class="mono {stock_class}">{row["stock"]}</td>
-                <td><span class="badge badge-{status_var}">{row["status"]}</span></td>
-            </tr>
-        '''
-    telem_html += '</tbody></table></div>'
-    st.markdown(telem_html, unsafe_allow_html=True)
+        telem_rows += f"""<tr>
+<td class="mono bold">{row['store']}</td>
+<td class="mono muted">{row['sku']}</td>
+<td class="mono">{row['velocity']}</td>
+<td class="mono muted">{row['rop']}</td>
+<td class="mono {stock_class}">{row['stock']}</td>
+<td><span class="badge badge-{status_var}">{row['status']}</span></td>
+</tr>"""
+
+    telem_html = f"""<div class="nexus-table-wrapper">
+<div class="nexus-table-header">
+<span style="font-weight: 600; font-size: 14px; color: #0F172A;">Live SKU Telemetry</span>
+<span style="display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: #059669;">
+<span class="live-dot"></span> Live Stream Connected
+</span>
+</div>
+<table class="nexus-table">
+<thead>
+<tr>
+<th>Store</th>
+<th>SKU</th>
+<th>Velocity (U/day)</th>
+<th>ROP Threshold</th>
+<th>Live Stock</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+{telem_rows}
+</tbody>
+</table>
+</div>"""
+    render_html(telem_html)
