@@ -40,6 +40,8 @@ node_modules/
 
 # SQLite
 *.db
+*.db-shm
+*.db-wal
 *.sqlite3
 
 # Distribution
