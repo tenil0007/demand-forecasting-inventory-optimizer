@@ -13,9 +13,21 @@ RAW_COLUMNS = [
     "Seasonality", "Epidemic", "Demand"
 ]
 
+def get_season_from_date(dt) -> str:
+    """Map calendar date/month to seasonality category consistent with the dataset."""
+    month = dt.month if hasattr(dt, "month") else pd.to_datetime(dt).month
+    if month in [12, 1, 2]:
+        return "Winter"
+    elif month in [3, 4, 5]:
+        return "Spring"
+    elif month in [6, 7, 8]:
+        return "Summer"
+    else:
+        return "Summer"
+
 def engineer_features(df: pd.DataFrame) -> Tuple[pd.DataFrame, List[str], OrdinalEncoder]:
     """
-    Perform feature engineering on raw retail store inventory dataframe.
+    Perform feature engineering on raw retail store inventory dataframe without data leakage.
     Returns:
         (transformed_df, feature_column_names, fitted_season_encoder)
     """
@@ -34,9 +46,18 @@ def engineer_features(df: pd.DataFrame) -> Tuple[pd.DataFrame, List[str], Ordina
     # Lag and Rolling Stats per store-product (target: Demand)
     # Using true Demand to learn customer demand dynamics
     group = df.groupby(["Store ID", "Product ID"])["Demand"]
+    lag_cols = []
     for lag in [1, 7, 14, 28]:
-        df[f"demand_lag_{lag}"] = group.shift(lag)
+        col_name = f"demand_lag_{lag}"
+        df[col_name] = group.shift(lag)
+        lag_cols.append(col_name)
         
+    rolling_cols = [
+        "demand_rolling_mean_7",
+        "demand_rolling_std_7",
+        "demand_rolling_mean_28",
+        "demand_rolling_std_28"
+    ]
     df["demand_rolling_mean_7"] = group.transform(lambda x: x.shift(1).rolling(7).mean())
     df["demand_rolling_std_7"] = group.transform(lambda x: x.shift(1).rolling(7).std())
     df["demand_rolling_mean_28"] = group.transform(lambda x: x.shift(1).rolling(28).mean())
@@ -61,8 +82,9 @@ def engineer_features(df: pd.DataFrame) -> Tuple[pd.DataFrame, List[str], Ordina
     else:
         df["seasonality_encoded"] = 0
         
-    # Fill NA from lags
-    df = df.bfill().fillna(0)
+    # Drop rows where lag or rolling features are NaN (first 28 rows per store-product)
+    # This completely eliminates target/future data leakage from bfill()
+    df = df.dropna(subset=lag_cols + rolling_cols).reset_index(drop=True)
     
     exclude_cols = [
         "Date", "Store ID", "Product ID", "Category", "Region",

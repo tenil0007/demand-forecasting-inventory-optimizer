@@ -51,36 +51,33 @@ def approve_recommendation(
     
     if req.recommendation_id:
         log = db.query(AuditLog).filter(AuditLog.id == req.recommendation_id).first()
-        if log and not thread_id:
+        if not log:
+            raise HTTPException(status_code=404, detail=f"Recommendation ID {req.recommendation_id} not found")
+        if not thread_id:
             thread_id = log.thread_id
     elif thread_id:
         log = db.query(AuditLog).filter(AuditLog.thread_id == thread_id).first()
         
-    # Resume the LangGraph execution
-    final_state = {}
-    if thread_id:
-        try:
-            final_state = resume_agent(thread_id, req.decision, req.approver)
-        except Exception:
-            pass
+    if not thread_id:
+        raise HTTPException(status_code=400, detail="Either recommendation_id or thread_id must be provided")
 
-    # Ensure DB record is updated if graph or direct call
-    if not log and req.recommendation_id:
-        raise HTTPException(status_code=404, detail="Recommendation not found")
-        
-    if log:
-        log.decision = req.decision
-        log.approver = req.approver
-        log.decision_timestamp = datetime.utcnow()
-        db.commit()
+    # Resume the LangGraph execution — this executes approval_node which updates AuditLog
+    try:
+        final_state = resume_agent(thread_id, req.decision, req.approver)
+    except ValueError as ve:
+        raise HTTPException(status_code=404, detail=str(ve))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error resuming agent pipeline: {str(e)}")
+
+    # Fetch confirmed record from database
+    if not log and thread_id:
+        log = db.query(AuditLog).filter(AuditLog.thread_id == thread_id).first()
+    elif log:
         db.refresh(log)
-        log_id = log.id
-    else:
-        log_id = None
         
     return {
         "message": f"Recommendation {req.decision} successfully",
-        "log_id": log_id,
+        "log_id": log.id if log else None,
         "thread_id": thread_id,
         "decision": req.decision,
         "approver": req.approver,

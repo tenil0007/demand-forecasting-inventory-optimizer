@@ -37,7 +37,16 @@ def get_forecast(
             explanation = response.json().get("response", "")
         except Exception:
             # Fallback explanation if Ollama fails
-            explanation = f"Forecasted {forecast_results.get('forecast')} units with a confidence interval between {forecast_results.get('lower_bound')} and {forecast_results.get('upper_bound')}."
+            preds = forecast_results.get("predicted_demand", [])
+            lowers = forecast_results.get("lower_bound", [])
+            uppers = forecast_results.get("upper_bound", [])
+            if preds:
+                avg_pred = round(sum(preds) / len(preds), 1)
+                avg_lower = round(sum(lowers) / len(lowers), 1) if lowers else round(avg_pred * 0.85, 1)
+                avg_upper = round(sum(uppers) / len(uppers), 1) if uppers else round(avg_pred * 1.15, 1)
+                explanation = f"Forecasted average daily demand is {avg_pred} units over {len(preds)} days, with 95% confidence interval between {avg_lower} and {avg_upper} units."
+            else:
+                explanation = "Forecast generated successfully."
 
         return {
             "store_id": store_id,

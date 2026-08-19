@@ -1,18 +1,26 @@
+import os
+import sqlite3
+import logging
+from pathlib import Path
 from typing import Optional, Dict, Any
 from typing_extensions import TypedDict
 from langgraph.graph import StateGraph, START, END
-from langgraph.checkpoint.memory import MemorySaver
+from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.types import Command
 
+from backend.config import CHECKPOINT_DB_PATH
 from backend.agents.forecast_agent import forecast_node
 from backend.agents.risk_agent import risk_node
 from backend.agents.reorder_agent import reorder_node
 from backend.agents.approval_agent import approval_node
 
-# NOTE: Using MemorySaver for thread-level state checkpointing.
-# In production with multiple worker processes, a persistent checkpointer 
-# like SqliteSaver or PostgresSaver should replace MemorySaver.
-memory = MemorySaver()
+logger = logging.getLogger(__name__)
+
+# Ensure directory for persistent SQLite checkpointer exists
+Path(CHECKPOINT_DB_PATH).parent.mkdir(parents=True, exist_ok=True)
+_conn = sqlite3.connect(CHECKPOINT_DB_PATH, check_same_thread=False)
+checkpointer = SqliteSaver(_conn)
+checkpointer.setup()
 
 class AgentState(TypedDict, total=False):
     thread_id: Optional[str]
@@ -29,8 +37,8 @@ class AgentState(TypedDict, total=False):
     decision: Optional[str]
     recommendation_id: Optional[int]
 
-def create_agent_graph():
-    """Build and compile the LangGraph agent pipeline with MemorySaver checkpointer."""
+def create_agent_graph(saver=None):
+    """Build and compile the LangGraph agent pipeline with persistent SqliteSaver checkpointer."""
     graph = StateGraph(AgentState)
 
     # Add nodes
@@ -47,7 +55,8 @@ def create_agent_graph():
     graph.add_edge("approval_node", END)
 
     # Compile the graph with checkpointer
-    return graph.compile(checkpointer=memory)
+    active_saver = saver if saver is not None else checkpointer
+    return graph.compile(checkpointer=active_saver)
 
 # Global graph instance
 agent_app = create_agent_graph()
@@ -68,8 +77,8 @@ def run_agent_pipeline(store_id: str, product_id: str, thread_id: str):
     try:
         # Runs up to interrupt in approval_node
         agent_app.invoke(initial_state, config=config)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"Pipeline paused or reached interrupt: {e}")
         
     current_snapshot = agent_app.get_state(config)
     return current_snapshot.values if current_snapshot and current_snapshot.values else initial_state
@@ -81,12 +90,13 @@ def resume_agent(thread_id: str, decision: str, approver: str):
     """
     config = {"configurable": {"thread_id": thread_id}}
     
-    try:
-        state = agent_app.invoke(
-            Command(resume={"decision": decision, "approver": approver}),
-            config=config
-        )
-        return state
-    except Exception:
-        current_snapshot = agent_app.get_state(config)
-        return current_snapshot.values if current_snapshot and current_snapshot.values else {}
+    # Verify the thread exists in the persistent checkpointer
+    snapshot = agent_app.get_state(config)
+    if not snapshot or not snapshot.values:
+        raise ValueError(f"No active or interrupted state found for thread_id '{thread_id}'")
+        
+    state = agent_app.invoke(
+        Command(resume={"decision": decision, "approver": approver}),
+        config=config
+    )
+    return state

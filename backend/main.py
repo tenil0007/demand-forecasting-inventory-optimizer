@@ -3,12 +3,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from backend.db.database import init_db
 from backend.api import forecast_routes, reorder_routes, agent_routes, audit_routes
 
+from backend.config import ALLOWED_ORIGINS
+
 app = FastAPI(title="Retail Demand Forecasting API")
 
-# Setup CORS middleware
+# Setup CORS middleware with explicit allowed origins
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins for development
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

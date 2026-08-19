@@ -16,8 +16,17 @@ RAW_DATA_PATH = os.getenv("RAW_DATA_PATH", str(BASE_DIR / "data" / "raw" / "reta
 PROCESSED_DATA_PATH = os.getenv("PROCESSED_DATA_PATH", str(BASE_DIR / "data" / "processed" / "features.csv"))
 MODEL_PATH = os.getenv("MODEL_PATH", str(BASE_DIR / "backend" / "models" / "xgb_model.pkl"))
 
-# --- Database ---
+# --- Database & Persistence ---
 DATABASE_URL = os.getenv("DATABASE_URL", f"sqlite:///{BASE_DIR / 'data' / 'audit.db'}")
+CHECKPOINT_DB_PATH = os.getenv("CHECKPOINT_DB_PATH", str(BASE_DIR / "data" / "checkpoints.db"))
+
+# --- Security & CORS ---
+ALLOWED_ORIGINS = [
+    origin.strip() for origin in os.getenv(
+        "ALLOWED_ORIGINS",
+        "http://localhost:8501,http://127.0.0.1:8501,http://localhost:3000,http://127.0.0.1:3000,http://localhost:8000,http://127.0.0.1:8000"
+    ).split(",") if origin.strip()
+]
 
 # --- Ollama LLM ---
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")

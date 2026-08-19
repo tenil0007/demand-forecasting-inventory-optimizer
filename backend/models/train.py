@@ -8,6 +8,11 @@ import sys
 from pathlib import Path
 from sklearn.preprocessing import OrdinalEncoder
 from sklearn.metrics import mean_absolute_percentage_error, mean_squared_error, mean_absolute_error
+try:
+    from sklearn.metrics import root_mean_squared_error
+except ImportError:
+    def root_mean_squared_error(y_true, y_pred):
+        return float(np.sqrt(mean_squared_error(y_true, y_pred)))
 from xgboost import XGBRegressor
 
 # Add project root to sys.path
@@ -58,7 +63,7 @@ def train_prophet_baseline(train_df: pd.DataFrame, test_df: pd.DataFrame) -> dic
         y_pred = np.clip(forecast['yhat'].values, 0, None)
         
         p_mape = float(mean_absolute_percentage_error(y_true, y_pred))
-        p_rmse = float(mean_squared_error(y_true, y_pred, squared=False))
+        p_rmse = float(root_mean_squared_error(y_true, y_pred))
         p_mae = float(mean_absolute_error(y_true, y_pred))
         
         logger.info(f"Prophet Baseline Metrics — MAPE: {p_mape:.4f}, RMSE: {p_rmse:.2f}, MAE: {p_mae:.2f}")
@@ -106,7 +111,7 @@ def train_model():
     # Evaluate XGBoost
     preds = xgb_model.predict(X_test)
     mape = mean_absolute_percentage_error(y_test, preds)
-    rmse = mean_squared_error(y_test, preds, squared=False)
+    rmse = root_mean_squared_error(y_test, preds)
     mae = mean_absolute_error(y_test, preds)
     
     xgb_metrics = {
@@ -119,7 +124,7 @@ def train_model():
     logger.info(f"XGBoost Evaluation Metrics: {xgb_metrics}")
     
     # Baseline comparison (Prophet)
-    prophet_metrics = train_prophet_baseline(raw_df[train_mask], raw_df[test_mask])
+    prophet_metrics = train_prophet_baseline(df.loc[train_mask], df.loc[test_mask])
     
     comparison_metrics = {
         "xgboost": xgb_metrics,

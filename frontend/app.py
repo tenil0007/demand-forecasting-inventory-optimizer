@@ -708,7 +708,30 @@ def process_reorder_data(df):
     return summary
 
 def get_audit_logs():
-    """Fetches audit trail from SQLite database or fallback records."""
+    """Fetches real audit trail from the API endpoint or database."""
+    try:
+        resp = requests.get(f"{API_URL}/audit/log", timeout=3)
+        if resp.status_code == 200:
+            logs = resp.json()
+            if logs:
+                records = []
+                for l in logs:
+                    records.append({
+                        "id": l.get("id"),
+                        "thread_id": l.get("thread_id"),
+                        "timestamp": l.get("timestamp", "N/A"),
+                        "store_id": l.get("store_id"),
+                        "product_id": l.get("product_id"),
+                        "recommended_qty": int(l.get("recommended_qty", 0)),
+                        "risk_level": l.get("risk_level", "LOW"),
+                        "decision_status": (l.get("decision") or "PENDING").upper(),
+                        "approver": l.get("approver") or "System Agent",
+                        "reasoning": l.get("reasoning_snapshot") or ""
+                    })
+                return pd.DataFrame(records)
+    except Exception:
+        pass
+
     if BACKEND_AVAILABLE:
         try:
             db = SessionLocal()
@@ -717,6 +740,7 @@ def get_audit_logs():
             for l in logs:
                 records.append({
                     "id": l.id,
+                    "thread_id": l.thread_id,
                     "timestamp": l.timestamp.strftime("%Y-%m-%d %H:%M:%S") if l.timestamp else "N/A",
                     "store_id": l.store_id,
                     "product_id": l.product_id,
@@ -732,11 +756,47 @@ def get_audit_logs():
         except Exception:
             pass
             
-    return pd.DataFrame([
-        {"id": 1, "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "store_id": "S001", "product_id": "P001", "recommended_qty": 115, "risk_level": "HIGH", "decision_status": "APPROVED", "approver": "A. Chen (Supply Chain Mgr)", "reasoning": "Cover 7-day supplier lead time"},
-        {"id": 2, "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "store_id": "S002", "product_id": "P004", "recommended_qty": 75, "risk_level": "MEDIUM", "decision_status": "PENDING", "approver": "System Agent", "reasoning": "Buffer adjustment"},
-        {"id": 3, "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "store_id": "S003", "product_id": "P008", "recommended_qty": 130, "risk_level": "HIGH", "decision_status": "REJECTED", "approver": "M. Davis (Inventory Lead)", "reasoning": "Manual holding adjustment"}
-    ])
+    return pd.DataFrame()
+
+def get_pending_recommendations(reorder_df):
+    """Fetches real pending recommendations from the audit database/LangGraph pipeline."""
+    audit_df = get_audit_logs()
+    pending_logs = pd.DataFrame()
+    if not audit_df.empty:
+        pending_logs = audit_df[audit_df["decision_status"] == "PENDING"]
+        
+    # If no pending recommendations exist in the database, initialize through real agent pipeline
+    if pending_logs.empty and not reorder_df.empty:
+        risk_skus = reorder_df[reorder_df['risk_level'].isin(['HIGH', 'MEDIUM'])].head(5)
+        for _, r in risk_skus.iterrows():
+            s_id = r['store_id']
+            p_id = r['product_id']
+            t_id = f"{s_id}_{p_id}_init"
+            try:
+                if BACKEND_AVAILABLE:
+                    from backend.agents.graph import run_agent_pipeline
+                    run_agent_pipeline(s_id, p_id, t_id)
+                else:
+                    requests.get(f"{API_URL}/agent/query/{s_id}/{p_id}", timeout=5)
+            except Exception:
+                pass
+        audit_df = get_audit_logs()
+        if not audit_df.empty:
+            pending_logs = audit_df[audit_df["decision_status"] == "PENDING"]
+
+    if not pending_logs.empty:
+        merged = pending_logs.merge(
+            reorder_df[['store_id', 'product_id', 'category', 'inventory_level', 'safety_stock', 'reorder_point', 'economic_order_qty']],
+            on=['store_id', 'product_id'],
+            how='left'
+        )
+        merged['safety_stock'] = merged['safety_stock'].fillna(25.0)
+        merged['reorder_point'] = merged['reorder_point'].fillna(75.0)
+        merged['inventory_level'] = merged['inventory_level'].fillna(50.0)
+        merged['economic_order_qty'] = merged['economic_order_qty'].fillna(merged['recommended_qty']).astype(int)
+        merged['category'] = merged['category'].fillna('Retail Goods')
+        return merged
+    return pd.DataFrame()
 
 def risk_badge(level):
     variant = {'HIGH': 'red', 'MEDIUM': 'amber', 'LOW': 'green'}.get(level, 'gray')
@@ -1121,73 +1181,102 @@ elif active_tab == nav_options[2]:
 </div>"""
             render_html(table_html)
 
+        pending_df = get_pending_recommendations(reorder_df)
+        review_pool = pending_df if not pending_df.empty else view_df
+
         with col_panel:
-            sku_options = [f"{r['store_id']} • {r['product_id']} ({r['risk_level']} RISK)" for _, r in view_df.iterrows()]
-            selected_sku_idx = st.selectbox(
-                "Select Pending SKU for Review:",
-                range(len(sku_options)),
-                format_func=lambda i: sku_options[i]
-            )
-            target = view_df.iloc[selected_sku_idx]
-            stock_val_class = "hitl-stat-value-danger" if target['inventory_level'] < target['reorder_point'] else "hitl-stat-value"
+            if not review_pool.empty:
+                sku_options = []
+                for _, r in review_pool.iterrows():
+                    rec_id_tag = f" [ID #{int(r['id'])}]" if "id" in r and pd.notna(r["id"]) else ""
+                    sku_options.append(f"{r['store_id']} • {r['product_id']} ({r['risk_level']} RISK){rec_id_tag}")
 
-            render_html(f'''
-            <div class="hitl-panel">
-                <div class="hitl-panel-header">
-                    <div class="hitl-panel-header-top">
-                        <div class="hitl-panel-title">HITL Review</div>
-                        {risk_badge(target["risk_level"])}
-                    </div>
-                    <div class="hitl-panel-subtitle">{target["store_id"]} • {target["product_id"]} • {target["category"]}</div>
-                </div>
-                <div class="hitl-panel-body">
-                    <div class="hitl-stat-grid">
-                        <div class="hitl-stat-box hitl-stat-box-default">
-                            <div class="hitl-stat-label">Current Stock</div>
-                            <div class="{stock_val_class}">{int(target["inventory_level"])}</div>
-                        </div>
-                        <div class="hitl-stat-box hitl-stat-box-primary">
-                            <div class="hitl-stat-label-primary">Recommended EOQ</div>
-                            <div class="hitl-stat-value-primary">+{target["economic_order_qty"]}</div>
-                        </div>
-                    </div>
-                    <div class="hitl-detail-row">
-                        <span class="hitl-detail-label">Safety Stock (SS)</span>
-                        <span class="hitl-detail-value">{target["safety_stock"]:.0f} units</span>
-                    </div>
-                    <div class="hitl-detail-row">
-                        <span class="hitl-detail-label">Reorder Point (ROP)</span>
-                        <span class="hitl-detail-value">{target["reorder_point"]:.0f} units</span>
-                    </div>
-                    <div class="policy-reasoner">
-                        <div class="policy-reasoner-label">Policy Reasoner</div>
-                        {target["reasoning"]}
-                    </div>
-                </div>
-            </div>
-            ''')
+                selected_sku_idx = st.selectbox(
+                    "Select Pending SKU for Review:",
+                    range(len(sku_options)),
+                    format_func=lambda i: sku_options[i]
+                )
+                target = review_pool.iloc[selected_sku_idx]
+                stock_val_class = "hitl-stat-value-danger" if target['inventory_level'] < target['reorder_point'] else "hitl-stat-value"
+                rec_qty_val = int(target.get('economic_order_qty', target.get('recommended_qty', 0)))
 
-            bcol1, bcol2 = st.columns(2)
-            with bcol1:
-                if st.button("✕ Reject", use_container_width=True, type="secondary"):
-                    try:
-                        requests.post(f"{API_URL}/audit/approve", json={
-                            "recommendation_id": int(selected_sku_idx + 1),
-                            "decision": "rejected", "approver": "Inventory Manager"
-                        }, timeout=2)
-                    except Exception:
-                        pass
-                    st.warning(f"Rejected restock for {target['product_id']} at {target['store_id']}.")
-            with bcol2:
-                if st.button("✓ Approve", use_container_width=True, type="primary"):
-                    try:
-                        requests.post(f"{API_URL}/audit/approve", json={
-                            "recommendation_id": int(selected_sku_idx + 1),
-                            "decision": "approved", "approver": "Inventory Manager"
-                        }, timeout=2)
-                    except Exception:
-                        pass
-                    st.success(f"Approved order of {target['economic_order_qty']} units for {target['product_id']} at {target['store_id']}.")
+                render_html(f'''
+                <div class="hitl-panel">
+                    <div class="hitl-panel-header">
+                        <div class="hitl-panel-header-top">
+                            <div class="hitl-panel-title">HITL Review</div>
+                            {risk_badge(target["risk_level"])}
+                        </div>
+                        <div class="hitl-panel-subtitle">{target["store_id"]} • {target["product_id"]} • {target.get("category", "Retail")}</div>
+                    </div>
+                    <div class="hitl-panel-body">
+                        <div class="hitl-stat-grid">
+                            <div class="hitl-stat-box hitl-stat-box-default">
+                                <div class="hitl-stat-label">Current Stock</div>
+                                <div class="{stock_val_class}">{int(target["inventory_level"])}</div>
+                            </div>
+                            <div class="hitl-stat-box hitl-stat-box-primary">
+                                <div class="hitl-stat-label-primary">Recommended EOQ</div>
+                                <div class="hitl-stat-value-primary">+{rec_qty_val}</div>
+                            </div>
+                        </div>
+                        <div class="hitl-detail-row">
+                            <span class="hitl-detail-label">Safety Stock (SS)</span>
+                            <span class="hitl-detail-value">{target["safety_stock"]:.0f} units</span>
+                        </div>
+                        <div class="hitl-detail-row">
+                            <span class="hitl-detail-label">Reorder Point (ROP)</span>
+                            <span class="hitl-detail-value">{target["reorder_point"]:.0f} units</span>
+                        </div>
+                        <div class="policy-reasoner">
+                            <div class="policy-reasoner-label">Policy Reasoner</div>
+                            {target["reasoning"]}
+                        </div>
+                    </div>
+                </div>
+                ''')
+
+                bcol1, bcol2 = st.columns(2)
+                with bcol1:
+                    if st.button("✕ Reject", use_container_width=True, type="secondary"):
+                        try:
+                            payload = {
+                                "decision": "rejected",
+                                "approver": "Alex Chen (Supply Chain Mgr)"
+                            }
+                            if "id" in target and pd.notna(target["id"]):
+                                payload["recommendation_id"] = int(target["id"])
+                            if "thread_id" in target and pd.notna(target["thread_id"]):
+                                payload["thread_id"] = str(target["thread_id"])
+
+                            resp = requests.post(f"{API_URL}/audit/approve", json=payload, timeout=10)
+                            if resp.status_code == 200:
+                                st.warning(f"Rejected restock for {target['product_id']} at {target['store_id']}. Decision logged to audit trail.")
+                                st.rerun()
+                            else:
+                                st.error(f"Rejection failed (HTTP {resp.status_code}): {resp.text}")
+                        except Exception as e:
+                            st.error(f"Error communicating with backend API: {str(e)}")
+                with bcol2:
+                    if st.button("✓ Approve", use_container_width=True, type="primary"):
+                        try:
+                            payload = {
+                                "decision": "approved",
+                                "approver": "Alex Chen (Supply Chain Mgr)"
+                            }
+                            if "id" in target and pd.notna(target["id"]):
+                                payload["recommendation_id"] = int(target["id"])
+                            if "thread_id" in target and pd.notna(target["thread_id"]):
+                                payload["thread_id"] = str(target["thread_id"])
+
+                            resp = requests.post(f"{API_URL}/audit/approve", json=payload, timeout=10)
+                            if resp.status_code == 200:
+                                st.success(f"✓ Approved order of {rec_qty_val} units for {target['product_id']} at {target['store_id']}. Resumed LangGraph pipeline.")
+                                st.rerun()
+                            else:
+                                st.error(f"Approval failed (HTTP {resp.status_code}): {resp.text}")
+                        except Exception as e:
+                            st.error(f"Error communicating with backend API: {str(e)}")
 
 # ═════════════════════════════════════════════════════════════════════════════
 # TAB 4: AGENT CHAT

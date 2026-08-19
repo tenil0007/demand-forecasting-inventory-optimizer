@@ -76,3 +76,50 @@ def test_langgraph_interrupt_and_reject_resume():
     assert audit_entry.decision == "rejected"
     assert audit_entry.approver == approver_name
     db.close()
+
+
+def test_cross_process_checkpoint_persistence():
+    """
+    Test starting the graph in one subprocess, terminating it,
+    and resuming in a completely new subprocess from persistent SqliteSaver checkpoint.
+    """
+    import subprocess
+    import sys
+    import json
+
+    thread_id = f"test_crossproc_{uuid.uuid4().hex[:8]}"
+    store_id = "S001"
+    product_id = "P001"
+
+    # 1. Process 1: Start pipeline and pause at interrupt
+    code_proc1 = f"""
+import sys
+from backend.db.database import init_db
+from backend.agents.graph import run_agent_pipeline
+
+init_db()
+state = run_agent_pipeline('{store_id}', '{product_id}', '{thread_id}')
+assert state.get('store_id') == '{store_id}'
+"""
+    res1 = subprocess.run([sys.executable, "-c", code_proc1], capture_output=True, text=True)
+    assert res1.returncode == 0, f"Process 1 failed: {res1.stderr}"
+
+    # 2. Process 2: Fresh Python process resumes the exact thread_id
+    code_proc2 = f"""
+import sys
+from backend.agents.graph import resume_agent
+from backend.db.database import SessionLocal
+from backend.db.models import AuditLog
+
+resumed = resume_agent('{thread_id}', decision='approved', approver='MultiProcessTester')
+assert resumed.get('approved') is True
+
+db = SessionLocal()
+log = db.query(AuditLog).filter(AuditLog.thread_id == '{thread_id}').first()
+assert log is not None
+assert log.decision == 'approved'
+assert log.approver == 'MultiProcessTester'
+db.close()
+"""
+    res2 = subprocess.run([sys.executable, "-c", code_proc2], capture_output=True, text=True)
+    assert res2.returncode == 0, f"Process 2 failed: {res2.stderr}"

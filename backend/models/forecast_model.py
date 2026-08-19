@@ -11,6 +11,7 @@ from backend.config import (
     COL_CATEGORY, COL_REGION, COL_PRICE, COL_DISCOUNT, COL_WEATHER,
     COL_PROMOTION, COL_COMPETITOR_PRICING, COL_SEASONALITY, COL_EPIDEMIC, COL_DEMAND
 )
+from backend.models.features import get_season_from_date
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +44,17 @@ class ForecastModel:
             logger.warning(f"Model file not found at {target_path}")
             return False
 
+    def _encode_seasons(self, season_names: List[str]) -> List[float]:
+        """Encode seasonality using loaded season_encoder or fallback."""
+        if self.season_encoder is not None:
+            try:
+                return self.season_encoder.transform(pd.DataFrame({'Seasonality': season_names})).ravel().tolist()
+            except Exception as e:
+                logger.warning(f"Error using season_encoder: {e}")
+        # Default mapping matching OrdinalEncoder categories
+        mapping = {"Spring": 0.0, "Summer": 1.0, "Winter": 2.0}
+        return [mapping.get(s, 0.0) for s in season_names]
+
     def _build_features_for_sku(self, store_id: str, product_id: str, days_ahead: int = 14) -> pd.DataFrame:
         """Helper to create feature dataframe for inference if not explicitly provided."""
         if Path(RAW_DATA_PATH).exists():
@@ -60,8 +72,11 @@ class ForecastModel:
                     price = float(last_row[COL_PRICE])
                     comp_price = float(last_row[COL_COMPETITOR_PRICING]) if COL_COMPETITOR_PRICING in last_row else price
 
+                    season_names = [get_season_from_date(d) for d in dates]
+                    encoded_seasons = self._encode_seasons(season_names)
+
                     rows = []
-                    for d in dates:
+                    for idx, d in enumerate(dates):
                         row_dict = {
                             COL_DATE: d,
                             'day_of_week': d.dayofweek,
@@ -80,7 +95,7 @@ class ForecastModel:
                             'price_competitor_ratio': price / (comp_price + 1e-5),
                             COL_PROMOTION: 0,
                             COL_EPIDEMIC: 0,
-                            'seasonality_encoded': 0,
+                            'seasonality_encoded': encoded_seasons[idx],
                             'weather_Cloudy': 0,
                             'weather_Rainy': 0,
                             'weather_Snowy': 0,
@@ -95,6 +110,8 @@ class ForecastModel:
         
         # Fallback dummy features
         dates = pd.date_range(end=pd.Timestamp.today(), periods=days_ahead)
+        season_names = [get_season_from_date(d) for d in dates]
+        encoded_seasons = self._encode_seasons(season_names)
         return pd.DataFrame({
             COL_DATE: dates,
             'day_of_week': [d.dayofweek for d in dates],
@@ -113,7 +130,7 @@ class ForecastModel:
             'price_competitor_ratio': [1.0] * days_ahead,
             COL_PROMOTION: [0] * days_ahead,
             COL_EPIDEMIC: [0] * days_ahead,
-            'seasonality_encoded': [0] * days_ahead,
+            'seasonality_encoded': encoded_seasons,
             'weather_Cloudy': [0] * days_ahead,
             'weather_Rainy': [0] * days_ahead,
             'weather_Snowy': [0] * days_ahead,

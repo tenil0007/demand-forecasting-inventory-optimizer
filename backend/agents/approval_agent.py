@@ -53,5 +53,10 @@ def approval_node(state: dict) -> dict:
     return {
         "approved": approved,
         "approver": approver,
-        "decision": decision
+        "decision": decision,
+        "recommendation_id": rec_id,
+        "thread_id": thread_id,
+        "store_id": store_id,
+        "product_id": product_id,
+        "recommended_qty": recommended_qty
     }
