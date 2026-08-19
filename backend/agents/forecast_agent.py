@@ -3,6 +3,7 @@ import httpx
 from typing_extensions import TypedDict
 from backend.models.forecast_model import ForecastModel
 from backend.config import OLLAMA_BASE_URL, OLLAMA_MODEL
+from backend.observability import traced_ollama_call
 
 class AgentState(TypedDict):
     store_id: str
@@ -33,10 +34,15 @@ def forecast_node(state: AgentState) -> dict:
     try:
         prompt = f"Explain this demand forecast for Store {store_id}, Product {product_id}:\n{json.dumps(forecast_results, indent=2)}\nKeep it brief and actionable."
         
-        response = httpx.post(
-            f"{OLLAMA_BASE_URL}/api/generate",
-            json={"model": OLLAMA_MODEL, "prompt": prompt, "stream": False},
-            timeout=5.0
+        response = traced_ollama_call(
+            prompt=prompt,
+            session_id=state.get("thread_id", f"{store_id}_{product_id}"),
+            span_name="forecast_explanation",
+            call_fn=lambda: httpx.post(
+                f"{OLLAMA_BASE_URL}/api/generate",
+                json={"model": OLLAMA_MODEL, "prompt": prompt, "stream": False},
+                timeout=5.0,
+            ),
         )
         response.raise_for_status()
         explanation = response.json().get("response", "")

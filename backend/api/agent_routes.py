@@ -5,6 +5,7 @@ from pydantic import BaseModel
 from fastapi import APIRouter, HTTPException
 from backend.agents.graph import run_agent_pipeline
 from backend.config import OLLAMA_BASE_URL, OLLAMA_MODEL
+from backend.observability import traced_ollama_call
 
 router = APIRouter()
 
@@ -18,10 +19,15 @@ def parse_intent(query: str):
     prompt = f"Extract the store_id and product_id from this query: '{query}'. Return ONLY a JSON object with 'store_id' and 'product_id' keys."
     
     try:
-        response = httpx.post(
-            f"{OLLAMA_BASE_URL}/api/generate",
-            json={"model": OLLAMA_MODEL, "prompt": prompt, "stream": False},
-            timeout=3.0
+        response = traced_ollama_call(
+            prompt=prompt,
+            session_id=f"intent_{uuid.uuid4().hex[:8]}",
+            span_name="intent_parsing",
+            call_fn=lambda: httpx.post(
+                f"{OLLAMA_BASE_URL}/api/generate",
+                json={"model": OLLAMA_MODEL, "prompt": prompt, "stream": False},
+                timeout=3.0,
+            ),
         )
         response.raise_for_status()
         text = response.json().get("response", "")

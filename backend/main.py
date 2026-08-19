@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from backend.db.database import init_db
 from backend.api import forecast_routes, reorder_routes, agent_routes, audit_routes
+from backend.observability import shutdown_langfuse
 
 from backend.config import ALLOWED_ORIGINS
 
@@ -20,6 +21,11 @@ app.add_middleware(
 def startup_event():
     """Initialize the database on application startup."""
     init_db()
+
+@app.on_event("shutdown")
+def shutdown_event():
+    """Flush Langfuse pending events on shutdown — never per-request."""
+    shutdown_langfuse()
 
 # Include all API routers
 app.include_router(forecast_routes.router, prefix="/forecast", tags=["Forecast"])

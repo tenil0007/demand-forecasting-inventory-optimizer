@@ -32,6 +32,12 @@ ALLOWED_ORIGINS = [
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.1")
 
+# --- Langfuse Observability ---
+LANGFUSE_PUBLIC_KEY = os.getenv("LANGFUSE_PUBLIC_KEY", "")
+LANGFUSE_SECRET_KEY = os.getenv("LANGFUSE_SECRET_KEY", "")
+LANGFUSE_HOST = os.getenv("LANGFUSE_HOST", "https://cloud.langfuse.com")
+OBSERVABILITY_ENABLED = bool(LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY)
+
 # --- Inventory Optimization Parameters ---
 LEAD_TIME_DAYS = int(os.getenv("LEAD_TIME_DAYS", "7"))
 ORDER_COST = float(os.getenv("ORDER_COST", "50.0"))
