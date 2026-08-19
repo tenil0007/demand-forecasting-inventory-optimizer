@@ -66,7 +66,13 @@ def get_langfuse_client():
 # Trace helpers
 # ---------------------------------------------------------------------------
 
-def create_trace(session_id: str, name: str = "agent_pipeline", metadata: Optional[dict] = None):
+def create_trace(
+    session_id: str,
+    name: str = "agent_pipeline",
+    input: Optional[Any] = None,
+    output: Optional[Any] = None,
+    metadata: Optional[dict] = None
+):
     """
     Create a new Langfuse trace tied to *session_id* (typically thread_id).
     Returns the trace object, or None if observability is off.
@@ -77,6 +83,8 @@ def create_trace(session_id: str, name: str = "agent_pipeline", metadata: Option
     return client.trace(
         name=name,
         session_id=session_id,
+        input=input,
+        output=output,
         metadata=metadata or {},
     )
 
@@ -89,6 +97,13 @@ def add_trace_event(trace, event_name: str, metadata: Optional[dict] = None):
     if trace is None:
         return
     trace.event(name=event_name, metadata=metadata or {})
+
+
+def flush_langfuse():
+    """Flush pending events to Langfuse Cloud."""
+    client = get_langfuse_client()
+    if client is not None:
+        client.flush()
 
 
 # ---------------------------------------------------------------------------

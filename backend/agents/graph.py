@@ -13,7 +13,7 @@ from backend.agents.forecast_agent import forecast_node
 from backend.agents.risk_agent import risk_node
 from backend.agents.reorder_agent import reorder_node
 from backend.agents.approval_agent import approval_node
-from backend.observability import create_trace, add_trace_event
+from backend.observability import create_trace, add_trace_event, flush_langfuse
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +70,8 @@ def run_agent_pipeline(store_id: str, product_id: str, thread_id: str):
     # Create a Langfuse trace for the entire pipeline run (no-op if disabled)
     trace = create_trace(
         session_id=thread_id,
-        name="agent_pipeline",
+        name=f"Demand Forecasting — Store {store_id} / SKU {product_id}",
+        input={"store_id": store_id, "product_id": product_id},
         metadata={"store_id": store_id, "product_id": product_id},
     )
 
@@ -88,15 +89,23 @@ def run_agent_pipeline(store_id: str, product_id: str, thread_id: str):
     except Exception as e:
         logger.debug(f"Pipeline paused or reached interrupt: {e}")
 
-    # Log pipeline pause as a trace event
-    add_trace_event(trace, "pipeline_paused_at_approval", {
-        "store_id": store_id,
-        "product_id": product_id,
-        "status": "PENDING_APPROVAL",
-    })
-
     current_snapshot = agent_app.get_state(config)
-    return current_snapshot.values if current_snapshot and current_snapshot.values else initial_state
+    values = current_snapshot.values if current_snapshot and current_snapshot.values else initial_state
+
+    if trace is not None:
+        trace.update(output={
+            "risk_level": values.get("risk_level"),
+            "reorder_reasoning": values.get("reorder_reasoning"),
+            "status": "PENDING_APPROVAL",
+        })
+        add_trace_event(trace, "pipeline_paused_at_approval", {
+            "store_id": store_id,
+            "product_id": product_id,
+            "status": "PENDING_APPROVAL",
+        })
+        flush_langfuse()
+
+    return values
 
 def resume_agent(thread_id: str, decision: str, approver: str):
     """
@@ -113,7 +122,8 @@ def resume_agent(thread_id: str, decision: str, approver: str):
     # Create a Langfuse trace for the resume action (no-op if disabled)
     trace = create_trace(
         session_id=thread_id,
-        name="agent_resume",
+        name=f"Human Review — {decision.title()}",
+        input={"thread_id": thread_id, "decision": decision, "approver": approver},
         metadata={"decision": decision, "approver": approver},
     )
 
@@ -122,11 +132,18 @@ def resume_agent(thread_id: str, decision: str, approver: str):
         config=config
     )
 
-    # Attach the real decision and approver as a trace event
-    add_trace_event(trace, "approval_decision", {
-        "decision": decision,
-        "approver": approver,
-        "thread_id": thread_id,
-    })
+    if trace is not None:
+        trace.update(output={
+            "decision": decision,
+            "approver": approver,
+            "approved": state.get("approved"),
+            "recommendation_id": state.get("recommendation_id")
+        })
+        add_trace_event(trace, "approval_decision", {
+            "decision": decision,
+            "approver": approver,
+            "thread_id": thread_id,
+        })
+        flush_langfuse()
 
     return state
