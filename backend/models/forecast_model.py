@@ -183,7 +183,8 @@ class ForecastModel:
         store_id: str = "S001",
         product_id: str = "P001",
         return_structured: bool = False,
-        top_k: int = 5
+        top_k: int = 5,
+        days_ahead: int = 7
     ) -> Any:
         """
         Returns top SHAP contributing features.
@@ -199,7 +200,7 @@ class ForecastModel:
                 return "Recent 7-day sales velocity (+40%) and active promotion (+15%) are primary drivers."
                 
         if df_features is None:
-            df_features = self._build_features_for_sku(store_id, product_id, days_ahead=7)
+            df_features = self._build_features_for_sku(store_id, product_id, days_ahead=days_ahead)
 
         for c in self.feature_cols:
             if c not in df_features.columns:

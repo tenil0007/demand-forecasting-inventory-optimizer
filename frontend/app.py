@@ -685,35 +685,49 @@ def fetch_fairness_audit():
             return None
     return None
 
+@st.cache_data(ttl=300)
 def process_reorder_data(df):
     """Calculates SKU-level replenishment recommendations and risk status directly from the dataset."""
     if df.empty:
         return pd.DataFrame()
     
+    # H-1 FIX: Sort by date so .tail(14) gets the most recent 14 days, not random rows
+    df = df.sort_values(['store_id', 'product_id', 'date'])
+    
     summary = df.groupby(['store_id', 'product_id']).agg({
         'category': 'first',
         'region': 'first',
-        'inventory_level': lambda x: float(x.tail(14).median()) if float(x.tail(14).median()) > 0 else float(x.mean()),
-        'demand': lambda x: float(x.tail(14).mean()) if float(x.tail(14).mean()) > 0 else float(x.mean()),
+        # C-2 FIX: Don't mask zero inventory — only fall back if no rows exist
+        'inventory_level': lambda x: float(x.tail(14).median()) if len(x.tail(14)) > 0 else float(x.mean()),
+        'demand': lambda x: float(x.tail(14).mean()) if len(x.tail(14)) > 0 else float(x.mean()),
         'price': 'last'
     }).reset_index()
     
-    # Mathematical inventory policy
-    summary['safety_stock'] = (summary['demand'] * 0.20 * (7 ** 0.5) * 1.65).round(1)
-    summary['reorder_point'] = ((summary['demand'] * 3.5) + summary['safety_stock']).round(1)
-    summary['forecasted_demand'] = (summary['demand'] * 7).round(1)
+    # H-2 FIX: Use backend config constants instead of hardcoded values
+    _lead_time = LEAD_TIME_DAYS if BACKEND_AVAILABLE else 7
+    _service_z = SERVICE_LEVEL_Z if BACKEND_AVAILABLE else 1.65
+    _holding_pct = HOLDING_COST_PERCENT if BACKEND_AVAILABLE else 0.20
+    _order_cost = ORDER_COST if BACKEND_AVAILABLE else 50.0
+
+    # Mathematical inventory policy using config constants
+    demand_std = summary['demand'] * 0.20  # Approximate std as 20% of mean demand
+    summary['safety_stock'] = (_service_z * demand_std * (_lead_time ** 0.5)).round(1)
+    # C-1 FIX: Use full lead time (7 days) instead of 3.5
+    summary['reorder_point'] = ((summary['demand'] * _lead_time) + summary['safety_stock']).round(1)
+    summary['forecasted_demand'] = (summary['demand'] * _lead_time).round(1)
     
     # EOQ: sqrt((2 * annual_demand * order_cost) / holding_cost)
     annual_d = summary['demand'] * 365
-    holding_cost = summary['price'] * 0.20
-    summary['economic_order_qty'] = np.sqrt((2 * annual_d * 50.0) / np.maximum(holding_cost, 0.5)).round(0).astype(int)
+    holding_cost = summary['price'] * _holding_pct
+    summary['economic_order_qty'] = np.sqrt((2 * annual_d * _order_cost) / np.maximum(holding_cost, 0.5)).round(0).astype(int)
     
     def calculate_risk(row):
         inv = row['inventory_level']
         rop = row['reorder_point']
         if inv < rop:
             return 'HIGH'
-        elif inv < (rop * 1.35):
+        # H-2 FIX: Use 1.20 buffer to match backend stockout_risk_flag (was 1.35)
+        elif inv < (rop * 1.20):
             return 'MEDIUM'
         return 'LOW'
         
@@ -725,7 +739,7 @@ def process_reorder_data(df):
     )
     
     summary['reasoning'] = summary.apply(
-        lambda r: f"Current inventory ({r['inventory_level']:.0f} units) is below ROP ({r['reorder_point']:.1f}). Order {r['economic_order_qty']} units (EOQ) immediately to cover 7-day supplier lead time and maintain 95% service level."
+        lambda r: f"Current inventory ({r['inventory_level']:.0f} units) is below ROP ({r['reorder_point']:.1f}). Order {r['economic_order_qty']} units (EOQ) immediately to cover {_lead_time}-day supplier lead time and maintain 95% service level."
         if r['risk_level'] == 'HIGH' else (
             f"Inventory ({r['inventory_level']:.0f} units) is approaching safety buffer zone. Recommended restock: {r['recommended_qty']} units."
             if r['risk_level'] == 'MEDIUM' else
@@ -749,7 +763,7 @@ def get_audit_logs():
                         "timestamp": l.get("timestamp", "N/A"),
                         "store_id": l.get("store_id"),
                         "product_id": l.get("product_id"),
-                        "recommended_qty": int(l.get("recommended_qty", 0)),
+                        "recommended_qty": int(l.get("recommended_qty") or 0),
                         "risk_level": l.get("risk_level", "LOW"),
                         "decision_status": (l.get("decision") or "PENDING").upper(),
                         "approver": l.get("approver") or "System Agent",
@@ -762,24 +776,26 @@ def get_audit_logs():
     if BACKEND_AVAILABLE:
         try:
             db = SessionLocal()
-            logs = db.query(AuditLog).order_by(AuditLog.timestamp.desc()).all()
-            records = []
-            for l in logs:
-                records.append({
-                    "id": l.id,
-                    "thread_id": l.thread_id,
-                    "timestamp": l.timestamp.strftime("%Y-%m-%d %H:%M:%S") if l.timestamp else "N/A",
-                    "store_id": l.store_id,
-                    "product_id": l.product_id,
-                    "recommended_qty": int(l.recommended_qty) if l.recommended_qty else 0,
-                    "risk_level": l.risk_level or "LOW",
-                    "decision_status": (l.decision or "PENDING").upper(),
-                    "approver": l.approver or "System Agent",
-                    "reasoning": l.reasoning_snapshot or ""
-                })
-            db.close()
-            if records:
-                return pd.DataFrame(records)
+            try:
+                logs = db.query(AuditLog).order_by(AuditLog.timestamp.desc()).all()
+                records = []
+                for l in logs:
+                    records.append({
+                        "id": l.id,
+                        "thread_id": l.thread_id,
+                        "timestamp": l.timestamp.strftime("%Y-%m-%d %H:%M:%S") if l.timestamp else "N/A",
+                        "store_id": l.store_id,
+                        "product_id": l.product_id,
+                        "recommended_qty": int(l.recommended_qty) if l.recommended_qty else 0,
+                        "risk_level": l.risk_level or "LOW",
+                        "decision_status": (l.decision or "PENDING").upper(),
+                        "approver": l.approver or "System Agent",
+                        "reasoning": l.reasoning_snapshot or ""
+                    })
+                if records:
+                    return pd.DataFrame(records)
+            finally:
+                db.close()
         except Exception:
             pass
             
@@ -906,7 +922,8 @@ if active_tab == nav_options[0]:
         low_risk_count = int(len(reorder_df[reorder_df['risk_level'] == 'LOW'])) if not reorder_df.empty else 0
 
         risk_pct = round((high_risk_count / total_skus) * 100, 1)
-        service_level = round(max(85.0, ((total_skus - high_risk_count) / total_skus) * 100), 1)
+        # M-1 FIX: Show true service level instead of artificial 85% floor
+        service_level = round(((total_skus - high_risk_count) / total_skus) * 100, 1)
 
         # ── KPI Cards ─────────────────────────────────────────────────────
         c1, c2, c3, c4 = st.columns(4)
@@ -1160,14 +1177,15 @@ elif active_tab == nav_options[1]:
                 ''', unsafe_allow_html=True)
 
                 shap_data = []
-                if ForecastModel is not None:
+                if BACKEND_AVAILABLE:
                     try:
                         fmodel_shap = ForecastModel()
                         shap_data = fmodel_shap.explain_forecast(
                             store_id=store_sel,
                             product_id=prod_sel,
                             return_structured=True,
-                            top_k=5
+                            top_k=5,
+                            days_ahead=horizon
                         )
                     except Exception:
                         shap_data = []
@@ -1212,8 +1230,11 @@ elif active_tab == nav_options[1]:
 
                     # Safe symmetric range bound with generous margin for labels
                     max_impact = max([abs(v) for v in shap_impacts]) if shap_impacts else 10.0
-                    x_range_bound = max(max_impact * 1.55, 6.0)
-                    text_labels = [f" {v:+.2f} units" if v >= 0 else f"{v:+.2f} units " for v in shap_impacts]
+                    x_range_bound = max(max_impact * 1.8, 8.0)
+                    text_labels = [f"+{v:.2f} units" if v >= 0 else f"{v:+.2f} units" for v in shap_impacts]
+                    # Place negative-value labels inside bars to avoid collision with y-axis feature names
+                    text_positions = ['outside' if v >= 0 else 'inside' for v in shap_impacts]
+                    text_font_colors = ['#0F172A' if v >= 0 else '#FFFFFF' for v in shap_impacts]
 
                     fig_shap = go.Figure(go.Bar(
                         x=shap_impacts,
@@ -1224,12 +1245,14 @@ elif active_tab == nav_options[1]:
                             cornerradius=4
                         ),
                         text=text_labels,
-                        textposition='outside',
+                        textposition=text_positions,
+                        textfont=dict(color=text_font_colors, size=11),
+                        insidetextanchor='middle',
                         cliponaxis=False,
                         hovertemplate='<b>%{y}</b><br>Demand Impact: <b>%{x:+.2f} units/day</b><extra></extra>'
                     ))
                     fig_shap.update_layout(
-                        margin=dict(l=150, r=75, t=32, b=20),
+                        margin=dict(l=170, r=90, t=32, b=20),
                         height=340,
                         template='plotly_white',
                         paper_bgcolor='rgba(0,0,0,0)',
@@ -1251,12 +1274,12 @@ elif active_tab == nav_options[1]:
                         ),
                         annotations=[
                             dict(
-                                x=-x_range_bound * 0.65, y=1.14, xref="x", yref="paper",
+                                x=-x_range_bound * 0.55, y=1.14, xref="x", yref="paper",
                                 text="◀ Decreases Demand", showarrow=False,
                                 font=dict(size=10.5, color="#EF4444")
                             ),
                             dict(
-                                x=x_range_bound * 0.65, y=1.14, xref="x", yref="paper",
+                                x=x_range_bound * 0.55, y=1.14, xref="x", yref="paper",
                                 text="Increases Demand ▶", showarrow=False,
                                 font=dict(size=10.5, color="#10B981")
                             )
@@ -1288,12 +1311,15 @@ elif active_tab == nav_options[2]:
             rows_str = ""
             for _, r in view_df.iterrows():
                 stock_class = "danger" if r['inventory_level'] < r['reorder_point'] else "bold"
+                # H-4 FIX: Show recommended_qty (not full EOQ) — display dash for LOW risk
+                rec_qty = int(r.get('recommended_qty', 0))
+                qty_display = f"+{rec_qty}" if rec_qty > 0 else '<span class="muted">—</span>'
                 rows_str += f"""<tr>
 <td class="bold">{r['store_id']}</td>
 <td class="muted">{r['product_id']}</td>
 <td class="{stock_class}">{int(r['inventory_level'])}</td>
 <td class="muted">{r['reorder_point']:.0f}</td>
-<td class="primary">+{r['economic_order_qty']}</td>
+<td class="primary">{qty_display}</td>
 <td>{risk_badge(r['risk_level'])}</td>
 </tr>"""
 
@@ -1327,6 +1353,10 @@ elif active_tab == nav_options[2]:
         pending_df = get_pending_recommendations(reorder_df)
         review_pool = pending_df if not pending_df.empty else view_df
 
+        # H-3 FIX: Apply risk filter to review_pool so HITL panel stays in sync with table
+        if risk_filter and not review_pool.empty and 'risk_level' in review_pool.columns:
+            review_pool = review_pool[review_pool['risk_level'].isin(risk_filter)]
+
         with col_panel:
             if not review_pool.empty:
                 sku_options = []
@@ -1340,8 +1370,12 @@ elif active_tab == nav_options[2]:
                     format_func=lambda i: sku_options[i]
                 )
                 target = review_pool.iloc[selected_sku_idx]
-                stock_val_class = "hitl-stat-value-danger" if target['inventory_level'] < target['reorder_point'] else "hitl-stat-value"
-                rec_qty_val = int(target.get('economic_order_qty', target.get('recommended_qty', 0)))
+                # M-6 FIX: Guard against NaN values
+                inv_level = int(target['inventory_level']) if pd.notna(target.get('inventory_level')) else 0
+                rop_val = target['reorder_point'] if pd.notna(target.get('reorder_point')) else 0
+                stock_val_class = "hitl-stat-value-danger" if inv_level < rop_val else "hitl-stat-value"
+                # H-5 FIX: Prioritize recommended_qty over economic_order_qty
+                rec_qty_val = int(target.get('recommended_qty', target.get('economic_order_qty', 0)))
 
                 render_html(f'''
                 <div class="hitl-panel">
@@ -1385,16 +1419,20 @@ elif active_tab == nav_options[2]:
                         try:
                             payload = {
                                 "decision": "rejected",
-                                "approver": "Alex Chen (Supply Chain Mgr)"
+                                "approver": st.session_state.get("user_name", "Alex Chen (Supply Chain Mgr)")
                             }
                             if "id" in target and pd.notna(target["id"]):
                                 payload["recommendation_id"] = int(target["id"])
                             if "thread_id" in target and pd.notna(target["thread_id"]):
                                 payload["thread_id"] = str(target["thread_id"])
+                            # C-4 FIX: Generate fallback thread_id if missing
+                            if "thread_id" not in payload:
+                                payload["thread_id"] = f"{target['store_id']}_{target['product_id']}_manual"
 
                             resp = requests.post(f"{API_URL}/audit/approve", json=payload, timeout=10)
                             if resp.status_code == 200:
-                                st.warning(f"Rejected restock for {target['product_id']} at {target['store_id']}. Decision logged to audit trail.")
+                                # M-3 FIX: Use toast so message survives rerun
+                                st.toast(f"Rejected restock for {target['product_id']} at {target['store_id']}.", icon="⚠️")
                                 st.rerun()
                             else:
                                 st.error(f"Rejection failed (HTTP {resp.status_code}): {resp.text}")
@@ -1405,16 +1443,20 @@ elif active_tab == nav_options[2]:
                         try:
                             payload = {
                                 "decision": "approved",
-                                "approver": "Alex Chen (Supply Chain Mgr)"
+                                "approver": st.session_state.get("user_name", "Alex Chen (Supply Chain Mgr)")
                             }
                             if "id" in target and pd.notna(target["id"]):
                                 payload["recommendation_id"] = int(target["id"])
                             if "thread_id" in target and pd.notna(target["thread_id"]):
                                 payload["thread_id"] = str(target["thread_id"])
+                            # C-4 FIX: Generate fallback thread_id if missing
+                            if "thread_id" not in payload:
+                                payload["thread_id"] = f"{target['store_id']}_{target['product_id']}_manual"
 
                             resp = requests.post(f"{API_URL}/audit/approve", json=payload, timeout=10)
                             if resp.status_code == 200:
-                                st.success(f"✓ Approved order of {rec_qty_val} units for {target['product_id']} at {target['store_id']}. Resumed LangGraph pipeline.")
+                                # M-3 FIX: Use toast so message survives rerun
+                                st.toast(f"✓ Approved order of {rec_qty_val} units for {target['product_id']} at {target['store_id']}.", icon="✅")
                                 st.rerun()
                             else:
                                 st.error(f"Approval failed (HTTP {resp.status_code}): {resp.text}")
@@ -1536,7 +1578,7 @@ elif active_tab == nav_options[4]:
         approved_count = len(audit_df[audit_df['decision_status'] == 'APPROVED'])
         rejected_count = len(audit_df[audit_df['decision_status'] == 'REJECTED'])
         pending_count = len(audit_df[audit_df['decision_status'] == 'PENDING'])
-        app_rate = (approved_count / tot_decisions * 100) if tot_decisions > 0 else 0
+        app_rate = (approved_count / (approved_count + rejected_count) * 100) if (approved_count + rejected_count) > 0 else 0
 
         ak1, ak2, ak3, ak4 = st.columns(4)
         with ak1:
@@ -1686,7 +1728,8 @@ elif active_tab == nav_options[5]:
             for item in active_list:
                 is_flagged = item.get("is_flagged", False)
                 rel_deg = item.get("relative_degradation_pct", 0.0)
-                rel_color = "#DC2626" if rel_deg > 0 else "#10B981"
+                # M-5 FIX: Only show red when flagged, amber for positive but unflagged
+                rel_color = "#DC2626" if is_flagged else ("#F59E0B" if rel_deg > 0 else "#10B981")
                 badge_html = '<span class="badge badge-red">Requires Review</span>' if is_flagged else '<span class="badge badge-green">Nominal</span>'
                 row_bg = "background: rgba(239, 68, 68, 0.06);" if is_flagged else ""
 

@@ -1,6 +1,9 @@
+import logging
 import pandas as pd
 from backend.optimization.inventory_policy import stockout_risk_flag, safety_stock, reorder_point
-from backend.config import RAW_DATA_PATH, COL_STORE_ID, COL_PRODUCT_ID, COL_INVENTORY_LEVEL, LEAD_TIME_DAYS
+from backend.config import RAW_DATA_PATH, COL_DATE, COL_STORE_ID, COL_PRODUCT_ID, COL_INVENTORY_LEVEL, LEAD_TIME_DAYS
+
+logger = logging.getLogger(__name__)
 
 def risk_node(state: dict) -> dict:
     """
@@ -20,9 +23,11 @@ def risk_node(state: dict) -> dict:
         df = pd.read_csv(RAW_DATA_PATH)
         filtered_df = df[(df[COL_STORE_ID] == store_id) & (df[COL_PRODUCT_ID] == product_id)]
         if not filtered_df.empty:
+            # H-8 FIX: Sort by date before .iloc[-1] to get most recent inventory
+            filtered_df = filtered_df.sort_values(COL_DATE)
             current_inventory = float(filtered_df[COL_INVENTORY_LEVEL].iloc[-1])
     except Exception as e:
-        print(f"Error loading inventory data: {e}")
+        logger.error(f"Error loading inventory data: {e}")
 
     # Calculate ROP
     ss = safety_stock(demand_std, LEAD_TIME_DAYS)

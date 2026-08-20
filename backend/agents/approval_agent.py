@@ -37,18 +37,20 @@ def approval_node(state: dict) -> dict:
 
     # Resumed graph node commits final decision to audit log
     db = SessionLocal()
-    log = None
-    if rec_id:
-        log = db.query(AuditLog).filter(AuditLog.id == rec_id).first()
-    elif thread_id:
-        log = db.query(AuditLog).filter(AuditLog.thread_id == thread_id).first()
+    try:
+        log = None
+        if rec_id:
+            log = db.query(AuditLog).filter(AuditLog.id == rec_id).first()
+        elif thread_id:
+            log = db.query(AuditLog).filter(AuditLog.thread_id == thread_id).first()
 
-    if log:
-        log.decision = decision
-        log.approver = approver
-        log.decision_timestamp = datetime.utcnow()
-        db.commit()
-    db.close()
+        if log:
+            log.decision = decision
+            log.approver = approver
+            log.decision_timestamp = datetime.utcnow()
+            db.commit()
+    finally:
+        db.close()
 
     return {
         "approved": approved,

@@ -2,7 +2,7 @@ import pandas as pd
 from backend.optimization.inventory_policy import generate_recommendation
 from backend.db.database import SessionLocal
 from backend.db.models import AuditLog
-from backend.config import RAW_DATA_PATH, COL_STORE_ID, COL_PRODUCT_ID, COL_INVENTORY_LEVEL, COL_PRICE
+from backend.config import RAW_DATA_PATH, COL_DATE, COL_STORE_ID, COL_PRODUCT_ID, COL_INVENTORY_LEVEL, COL_PRICE
 
 def reorder_node(state: dict) -> dict:
     """
@@ -21,6 +21,8 @@ def reorder_node(state: dict) -> dict:
         df = pd.read_csv(RAW_DATA_PATH)
         filtered_df = df[(df[COL_STORE_ID] == store_id) & (df[COL_PRODUCT_ID] == product_id)]
         if not filtered_df.empty:
+            # H-9 FIX: Sort by date before .iloc[-1] to get most recent values
+            filtered_df = filtered_df.sort_values(COL_DATE)
             current_inventory = float(filtered_df[COL_INVENTORY_LEVEL].iloc[-1])
             price = float(filtered_df[COL_PRICE].iloc[-1])
     except Exception:
@@ -31,22 +33,24 @@ def reorder_node(state: dict) -> dict:
     recommended_qty = recommendation.get("economic_order_quantity", 0)
     reorder_reasoning = recommendation.get("reasoning", f"Order {recommended_qty} units.")
 
-    # Create initial audit log entry with PENDING status
+    # H-9 FIX: Create initial audit log entry with proper try/finally for DB session
     db = SessionLocal()
-    audit_entry = AuditLog(
-        thread_id=thread_id,
-        store_id=store_id,
-        product_id=product_id,
-        recommended_qty=recommended_qty,
-        risk_level=risk_level,
-        reasoning_snapshot=state.get("risk_reasoning", "") + "\n" + reorder_reasoning,
-        decision="PENDING"
-    )
-    db.add(audit_entry)
-    db.commit()
-    db.refresh(audit_entry)
-    recommendation_id = audit_entry.id
-    db.close()
+    try:
+        audit_entry = AuditLog(
+            thread_id=thread_id,
+            store_id=store_id,
+            product_id=product_id,
+            recommended_qty=recommended_qty,
+            risk_level=risk_level,
+            reasoning_snapshot=state.get("risk_reasoning", "") + "\n" + reorder_reasoning,
+            decision="PENDING"
+        )
+        db.add(audit_entry)
+        db.commit()
+        db.refresh(audit_entry)
+        recommendation_id = audit_entry.id
+    finally:
+        db.close()
 
     return {
         "recommendation": recommendation,
