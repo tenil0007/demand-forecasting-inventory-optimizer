@@ -16,6 +16,7 @@
         "RMSE": 32.68812599597497,
         "MAE": 24.671788644175376,
         "aggregate_MAPE": 0.057417541099021405,
+        "prediction_interval_q95": 67.55578002929686,
         "target": "Demand (Unconstrained)",
         "features_count": 24
     },

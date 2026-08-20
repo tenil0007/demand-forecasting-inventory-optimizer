@@ -28,14 +28,14 @@ def generate_retail_dataset(
     num_products: int = 10,
     start_date: str = "2026-02-19",
     days: int = 180,
-    output_path: str = "data/raw/retail_store_inventory.csv"
+    output_path: str = "data/generated/synthetic_retail_inventory.csv"
 ):
     np.random.seed(42)
     random.seed(42)
     
     dates = pd.date_range(start=start_date, periods=days, freq="D")
     stores = [f"S{i:03d}" for i in range(1, num_stores + 1)]
-    products = [f"P{i:03d}" for i in range(1, num_products + 1)]
+    products = [f"P{i:04d}" for i in range(1, num_products + 1)]
     
     categories = ["Groceries", "Beverages", "Snacks", "Personal Care", "Household"]
     regions = ["North", "South", "East", "West", "Central"]

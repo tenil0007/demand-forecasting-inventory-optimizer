@@ -46,6 +46,10 @@ def approve_recommendation(
     Approve or reject a recommendation by resuming the LangGraph pipeline from its interrupt state.
     The resumed graph node writes the final audit log entry.
     """
+    decision = str(req.decision).strip().lower()
+    if decision not in ["approved", "rejected"]:
+        raise HTTPException(status_code=400, detail=f"Invalid decision '{req.decision}': must be 'approved' or 'rejected'")
+
     thread_id = req.thread_id
     log = None
     
@@ -63,7 +67,7 @@ def approve_recommendation(
 
     # Resume the LangGraph execution — this executes approval_node which updates AuditLog
     try:
-        final_state = resume_agent(thread_id, req.decision, req.approver)
+        final_state = resume_agent(thread_id, decision, req.approver)
     except ValueError as ve:
         raise HTTPException(status_code=404, detail=str(ve))
     except Exception as e:

@@ -39,12 +39,12 @@ class TestFullSystemFeatures(unittest.TestCase):
         print(f"  [PASS] Dataset loaded successfully with {len(df)} rows and {len(df.columns)} columns.")
 
     def test_02_forecast_model_inference(self):
-        """Test XGBoost model loading, prediction, and SHAP explainability."""
+        """Test XGBoost model loading, recursive prediction, and SHAP explainability."""
         model = ForecastModel()
         model.load(MODEL_PATH)
         
         # Test predict
-        res = model.predict_demand(store_id="S001", product_id="P001", days_ahead=14)
+        res = model.predict_demand(store_id="S001", product_id="P0001", days_ahead=14)
         self.assertIn("dates", res)
         self.assertIn("predicted_demand", res)
         self.assertIn("lower_bound", res)
@@ -52,12 +52,12 @@ class TestFullSystemFeatures(unittest.TestCase):
         self.assertEqual(len(res["predicted_demand"]), 14)
         
         # Test explain (plain English)
-        explanation = model.explain_forecast(store_id="S001", product_id="P001")
+        explanation = model.explain_forecast(store_id="S001", product_id="P0001")
         self.assertIsInstance(explanation, str)
         self.assertGreater(len(explanation), 10)
 
         # Test explain (structured SHAP)
-        structured_shap = model.explain_forecast(store_id="S001", product_id="P001", return_structured=True, top_k=5)
+        structured_shap = model.explain_forecast(store_id="S001", product_id="P0001", return_structured=True, top_k=5)
         self.assertIsInstance(structured_shap, list)
         self.assertGreaterEqual(len(structured_shap), 1)
         first_feat = structured_shap[0]
@@ -92,7 +92,7 @@ class TestFullSystemFeatures(unittest.TestCase):
         self.assertIsNotNone(graph)
 
         thread_id = f"test_thread_{datetime.now().strftime('%Y%m%d%H%M%S')}"
-        state = run_agent_pipeline(store_id="S001", product_id="P001", thread_id=thread_id)
+        state = run_agent_pipeline(store_id="S001", product_id="P0001", thread_id=thread_id)
         
         self.assertIn("store_id", state)
         self.assertIn("risk_level", state)
@@ -109,7 +109,7 @@ class TestFullSystemFeatures(unittest.TestCase):
         try:
             entry = AuditLog(
                 store_id="S001",
-                product_id="P001",
+                product_id="P0001",
                 recommended_qty=100.0,
                 risk_level="HIGH",
                 reasoning_snapshot="Automated verification test log",
@@ -140,13 +140,13 @@ class TestFullSystemFeatures(unittest.TestCase):
         self.assertEqual(r.status_code, 200)
         
         # 2. Forecast endpoint
-        r = client.get("/forecast/S001/P001")
+        r = client.get("/forecast/S001/P0001")
         self.assertEqual(r.status_code, 200)
         data = r.json()
         self.assertIn("forecast", data)
         
         # 3. Reorder endpoint
-        r = client.get("/reorder/S001/P001")
+        r = client.get("/reorder/S001/P0001")
         self.assertEqual(r.status_code, 200)
         data = r.json()
         self.assertIn("risk_level", data)
@@ -157,9 +157,18 @@ class TestFullSystemFeatures(unittest.TestCase):
         self.assertEqual(r.status_code, 200)
         
         # 5. Agent query endpoint
-        r = client.post("/agent/query", json={"query": "What is the status of store S001?"})
+        r = client.post("/agent/query", json={"query": "What is the forecast for store S001 product P0001?"})
         self.assertEqual(r.status_code, 200)
-        print("  [PASS] FastAPI Endpoints: All 4 route modules returned 200 OK.")
+        
+        # 6. Negative test: invalid entity ID format returns 400
+        r_bad = client.get("/forecast/INVALID_STORE/P0001")
+        self.assertEqual(r_bad.status_code, 400)
+        
+        # 7. Negative test: non-existent SKU returns 404
+        r_404 = client.get("/forecast/S001/P9999")
+        self.assertEqual(r_404.status_code, 404)
+        
+        print("  [PASS] FastAPI Endpoints: All positive & negative route responses verified.")
 
 
 if __name__ == "__main__":

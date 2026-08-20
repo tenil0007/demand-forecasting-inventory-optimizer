@@ -1,23 +1,23 @@
 {
   "naive_policy": {
-    "total_cost": 7789113.23,
-    "lost_sales": 7519038.87,
-    "holding_cost": 24624.36,
-    "order_cost": 245450.0,
-    "fill_rate": 0.8225,
-    "stockout_units": 110174
+    "total_cost": 34726418.5,
+    "lost_sales": 34680037.16,
+    "holding_cost": 2481.34,
+    "order_cost": 43900.0,
+    "fill_rate": 0.1732,
+    "stockout_units": 513056
   },
   "agent_policy": {
-    "total_cost": 371406.55,
-    "lost_sales": 61098.56,
-    "holding_cost": 246807.99,
-    "order_cost": 63500.0,
-    "fill_rate": 0.9985,
-    "stockout_units": 913
+    "total_cost": 4190059.9,
+    "lost_sales": 4037984.01,
+    "holding_cost": 93375.89,
+    "order_cost": 58700.0,
+    "fill_rate": 0.9058,
+    "stockout_units": 58449
   },
   "comparison": {
-    "cost_savings_dollars": 7417706.67,
-    "cost_savings_pct": 95.23,
-    "fill_rate_improvement_pct": 17.61
+    "cost_savings_dollars": 30536358.6,
+    "cost_savings_pct": 87.93,
+    "fill_rate_improvement_pct": 73.26
   }
 }

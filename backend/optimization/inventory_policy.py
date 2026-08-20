@@ -1,5 +1,5 @@
 import math
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 from backend.config import (
     LEAD_TIME_DAYS, ORDER_COST, HOLDING_COST_PERCENT, SERVICE_LEVEL_Z
@@ -42,10 +42,19 @@ def stockout_risk_flag(current_inventory: float, forecasted_demand: float, reord
     else:
         return "LOW"
 
-def generate_recommendation(store_id: str, product_id: str, forecast_data: Dict[str, Any], current_inventory: float, price: float) -> Dict[str, Any]:
+def generate_recommendation(
+    store_id: str,
+    product_id: str,
+    forecast_data: Dict[str, Any],
+    current_inventory: float,
+    price: float,
+    demand_std: Optional[float] = None
+) -> Dict[str, Any]:
     """
-    Generate inventory recommendation based on forecast and current state.
+    Generate single-source-of-truth inventory recommendation based on forecast and current state.
     """
+    if not isinstance(forecast_data, dict):
+        return {"error": "Invalid forecast data structure."}
     if "error" in forecast_data:
         return {"error": forecast_data["error"]}
         
@@ -54,11 +63,15 @@ def generate_recommendation(store_id: str, product_id: str, forecast_data: Dict[
         return {"error": "No predictions found."}
         
     # Stats from forecast
-    avg_daily_demand = sum(predictions) / len(predictions)
-    demand_std = math.sqrt(sum((x - avg_daily_demand)**2 for x in predictions) / len(predictions)) if len(predictions) > 1 else avg_daily_demand * 0.1
+    avg_daily_demand = float(sum(predictions) / len(predictions))
+    if demand_std is None or demand_std <= 0:
+        if len(predictions) > 1:
+            demand_std = float(math.sqrt(sum((x - avg_daily_demand)**2 for x in predictions) / (len(predictions) - 1)))
+        else:
+            demand_std = max(float(avg_daily_demand * 0.15), 1.0)
     
-    annual_demand = avg_daily_demand * 365
-    holding_cost_per_unit = price * HOLDING_COST_PERCENT
+    annual_demand = max(avg_daily_demand * 365.0, 1.0)
+    holding_cost_per_unit = max(float(price * HOLDING_COST_PERCENT), 0.01)
     
     # Calculate policies
     ss = safety_stock(demand_std, LEAD_TIME_DAYS, SERVICE_LEVEL_Z)
@@ -67,20 +80,28 @@ def generate_recommendation(store_id: str, product_id: str, forecast_data: Dict[
     
     risk_flag = stockout_risk_flag(current_inventory, avg_daily_demand * LEAD_TIME_DAYS, rop)
     
-    # Construct reasoning
+    # Recommended quantity: EOQ for HIGH risk, 50% EOQ for MEDIUM risk buffer, 0 for LOW risk
     if risk_flag == "HIGH":
-        reasoning = f"Current inventory ({current_inventory}) is below the reorder point ({rop:.2f}). Order {eoq:.0f} units immediately."
+        recommended_qty = int(round(eoq))
+        reasoning = f"Current inventory ({current_inventory:.0f} units) is below ROP ({rop:.1f}). Order {recommended_qty} units (EOQ) immediately to cover {LEAD_TIME_DAYS}-day lead time."
     elif risk_flag == "MEDIUM":
-        reasoning = f"Current inventory ({current_inventory}) is approaching the reorder point ({rop:.2f}). Monitor closely; an order of {eoq:.0f} units may be needed soon."
+        recommended_qty = int(round(eoq * 0.5))
+        reasoning = f"Current inventory ({current_inventory:.0f} units) is approaching safety buffer ({rop:.1f} ROP). Order {recommended_qty} units to maintain buffer."
     else:
-        reasoning = f"Current inventory ({current_inventory}) is healthy and above the reorder point ({rop:.2f}). No immediate action required."
+        recommended_qty = 0
+        reasoning = f"Current inventory ({current_inventory:.0f} units) is healthy and above ROP ({rop:.1f}). No replenishment order required."
 
     recommendation = {
         "store_id": store_id,
         "product_id": product_id,
+        "current_inventory": round(current_inventory, 1),
+        "price": round(price, 2),
+        "avg_daily_demand": round(avg_daily_demand, 2),
+        "demand_std": round(demand_std, 2),
         "safety_stock": round(ss, 2),
         "reorder_point": round(rop, 2),
         "economic_order_quantity": round(eoq, 2),
+        "recommended_qty": recommended_qty,
         "stockout_risk": risk_flag,
         "reasoning": reasoning
     }

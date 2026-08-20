@@ -59,7 +59,7 @@ _EXCESSIVE_NEWLINES_RE = re.compile(r"\n{3,}")
 # Entity-ID patterns
 # ---------------------------------------------------------------------------
 STORE_ID_RE = re.compile(r"^S\d{3}$")
-PRODUCT_ID_RE = re.compile(r"^P\d{3,4}$")
+PRODUCT_ID_RE = re.compile(r"^P\d{4}$")
 
 
 # ---------------------------------------------------------------------------

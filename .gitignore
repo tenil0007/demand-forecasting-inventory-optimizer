@@ -44,7 +44,12 @@ node_modules/
 *.db-wal
 *.sqlite3
 
-# Distribution
+# Distribution & Temporary
 dist/
 build/
 *.egg-info/
+.pytest_cache/
+logs/
+*.log
+*.tmp
+submission_clean_package/

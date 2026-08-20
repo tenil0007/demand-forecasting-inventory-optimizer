@@ -23,7 +23,7 @@ def get_season_from_date(dt) -> str:
     elif month in [6, 7, 8]:
         return "Summer"
     else:
-        return "Summer"
+        return "Autumn"
 
 def engineer_features(df: pd.DataFrame) -> Tuple[pd.DataFrame, List[str], OrdinalEncoder]:
     """

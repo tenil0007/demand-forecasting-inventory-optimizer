@@ -10,9 +10,9 @@ def approval_node(state: dict) -> dict:
     2. Upon resume, writes the final audit log decision from within the graph.
     """
     store_id = state.get("store_id", "S001")
-    product_id = state.get("product_id", "P001")
+    product_id = state.get("product_id", "P0001")
     rec = state.get("recommendation", {})
-    recommended_qty = float(rec.get("economic_order_quantity", 0.0))
+    recommended_qty = float(rec.get("recommended_qty", rec.get("economic_order_quantity", 0.0)))
     risk_level = state.get("risk_level", "LOW")
     reasoning = state.get("reorder_reasoning", "")
     thread_id = state.get("thread_id")
@@ -31,7 +31,10 @@ def approval_node(state: dict) -> dict:
     })
 
     # When resumed via Command(resume={...}), execution continues here
-    decision = human_input.get("decision", "approved")
+    decision = str(human_input.get("decision", "")).strip().lower()
+    if decision not in ["approved", "rejected"]:
+        raise ValueError(f"Invalid approval decision '{decision}': must be 'approved' or 'rejected'")
+        
     approver = human_input.get("approver", "Human Reviewer")
     approved = (decision == "approved")
 

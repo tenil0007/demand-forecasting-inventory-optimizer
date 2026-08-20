@@ -15,7 +15,7 @@ def test_langgraph_interrupt_and_approve_resume():
     """Test starting the graph, verifying it pauses at interrupt, and resuming with approval."""
     thread_id = f"test_thread_approve_{uuid.uuid4().hex[:8]}"
     store_id = "S001"
-    product_id = "P001"
+    product_id = "P0001"
 
     # 1. Start graph execution -> reaches interrupt in approval_node
     paused_state = run_agent_pipeline(store_id, product_id, thread_id)
@@ -54,7 +54,7 @@ def test_langgraph_interrupt_and_reject_resume():
     """Test starting the graph, pausing at interrupt, and resuming with rejection."""
     thread_id = f"test_thread_reject_{uuid.uuid4().hex[:8]}"
     store_id = "S002"
-    product_id = "P002"
+    product_id = "P0002"
 
     # 1. Start graph
     paused_state = run_agent_pipeline(store_id, product_id, thread_id)
@@ -89,7 +89,7 @@ def test_cross_process_checkpoint_persistence():
 
     thread_id = f"test_crossproc_{uuid.uuid4().hex[:8]}"
     store_id = "S001"
-    product_id = "P001"
+    product_id = "P0001"
 
     # 1. Process 1: Start pipeline and pause at interrupt
     code_proc1 = f"""

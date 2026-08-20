@@ -137,6 +137,11 @@ def train_model():
     agg_rmse = root_mean_squared_error(daily_agg['actual'], daily_agg['predicted'])
     agg_mae = mean_absolute_error(daily_agg['actual'], daily_agg['predicted'])
     
+    # Calculate empirical 95th percentile absolute residual for prediction interval calibration
+    abs_residuals = np.abs(y_test.values - preds)
+    q95_residual = float(np.percentile(abs_residuals, 95))
+    logger.info(f"Empirical 95% prediction interval calibration bound: +/- {q95_residual:.2f} units")
+
     xgb_metrics = {
         "per_row": {
             "MAPE": float(mape),
@@ -154,6 +159,7 @@ def train_model():
         "RMSE": float(rmse),
         "MAE": float(mae),
         "aggregate_MAPE": float(agg_mape),
+        "prediction_interval_q95": q95_residual,
         "target": "Demand (Unconstrained)",
         "features_count": len(feature_cols)
     }
@@ -179,14 +185,15 @@ def train_model():
     with open(artifacts_dir / "model_metrics.json", "w") as f:
         json.dump(comparison_metrics, f, indent=4)
         
-    # Save model and feature columns
+    # Save model and feature columns with calibration
     model_dir = Path(MODEL_PATH).parent
     model_dir.mkdir(parents=True, exist_ok=True)
     
     joblib.dump({
         "model": xgb_model,
         "feature_cols": feature_cols,
-        "season_encoder": season_encoder
+        "season_encoder": season_encoder,
+        "prediction_interval_q95": q95_residual
     }, MODEL_PATH)
     
     logger.info(f"Model and metrics saved successfully to {MODEL_PATH}")

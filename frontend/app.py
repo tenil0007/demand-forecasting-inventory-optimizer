@@ -615,30 +615,15 @@ def load_data():
                 df['date'] = pd.to_datetime(df['date'])
             return df
         except Exception as e:
-            st.error(f"Error loading dataset: {e}")
-            return pd.DataFrame()
+            st.error(f"Error loading dataset from {RAW_DATA_PATH}: {e}")
+            st.stop()
     else:
-        dates = pd.date_range(start="2026-01-01", periods=120)
-        records = []
-        for s in ['S001', 'S002', 'S003', 'S004', 'S005']:
-            for p in [f'P{i:03d}' for i in range(1, 11)]:
-                for d in dates:
-                    records.append({
-                        'date': d, 'store_id': s, 'product_id': p,
-                        'category': 'Groceries' if int(p[1:]) <= 2 else ('Electronics' if int(p[1:]) <= 4 else 'Health & Beauty'),
-                        'region': 'North' if s in ['S001', 'S002'] else 'South',
-                        'demand': int(np.random.poisson(25)),
-                        'inventory_level': int(np.random.randint(20, 150)),
-                        'units_sold': int(np.random.randint(10, 30)),
-                        'price': 45.0, 'discount': 0.0, 'weather_condition': 'Sunny',
-                        'promotion': 0, 'competitor_pricing': 48.0, 'seasonality': 'Spring',
-                        'epidemic': 0
-                    })
-        return pd.DataFrame(records)
+        st.error(f"Production dataset not found at '{RAW_DATA_PATH}'. Please ensure raw dataset exists.")
+        st.stop()
 
 @st.cache_data(ttl=300)
 def fetch_metrics():
-    """Reads genuine model metrics from artifacts or default benchmarks."""
+    """Reads genuine model metrics from artifacts."""
     metrics_path = os.path.join(root_dir, "artifacts", "model_metrics.json")
     if os.path.exists(metrics_path):
         try:
@@ -669,9 +654,10 @@ def fetch_metrics():
                     "rmse": round(float(data.get('RMSE', data.get('rmse', 32.69))), 2),
                     "mae": round(float(data.get('MAE', data.get('mae', 24.67))), 2)
                 }
-        except Exception:
-            pass
-    return {"mape": 36.6, "mape_aggregate": 5.7, "prophet_mape": 21.0, "rmse": 32.69, "mae": 24.67}
+        except Exception as e:
+            st.warning(f"Error reading model_metrics.json: {e}")
+            return None
+    return None
 
 @st.cache_data(ttl=300)
 def fetch_fairness_audit():
@@ -1091,6 +1077,7 @@ elif active_tab == nav_options[1]:
                     future_dates = pd.date_range(start=last_date + pd.Timedelta(days=1), periods=horizon)
 
                     preds, lower_b, upper_b = [], [], []
+                    forecast_err = None
                     if BACKEND_AVAILABLE:
                         try:
                             fmodel = ForecastModel()
@@ -1098,37 +1085,32 @@ elif active_tab == nav_options[1]:
                             preds = res.get('predicted_demand', [])
                             lower_b = res.get('lower_bound', [])
                             upper_b = res.get('upper_bound', [])
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            forecast_err = str(e)
 
                     if not preds or len(preds) != horizon:
-                        recent_hist = filtered_df['demand'].tail(28)
-                        mean_d = recent_hist.mean()
-                        std_d = recent_hist.std() if len(recent_hist) > 1 else mean_d * 0.2
-                        preds = [round(float(mean_d + np.sin(i / 2.0) * 2), 2) for i in range(horizon)]
-                        lower_b = [round(max(0, p - 1.65 * std_d), 2) for p in preds]
-                        upper_b = [round(p + 1.65 * std_d, 2) for p in preds]
+                        st.error(f"Model forecast unavailable for {store_sel} / {prod_sel}: {forecast_err or 'Model artifact missing'}. Run training pipeline to generate predictions.")
+                    else:
+                        fig_fc = go.Figure()
+                        hist_sample = filtered_df.tail(45)
 
-                    fig_fc = go.Figure()
-                    hist_sample = filtered_df.tail(45)
-
-                    # Historical Line
-                    fig_fc.add_trace(go.Scatter(
-                        x=hist_sample['date'], y=hist_sample['demand'],
-                        mode='lines', name='Actual Demand', line=dict(color='#64748B', width=2)
-                    ))
-                    # Predicted Line
-                    fig_fc.add_trace(go.Scatter(
-                        x=future_dates, y=preds,
-                        mode='lines', name='AI Predicted Demand', line=dict(color='#2563EB', width=2.5, dash='dash')
-                    ))
-                    # Confidence Envelope
-                    fig_fc.add_trace(go.Scatter(
-                        x=future_dates.tolist() + future_dates.tolist()[::-1],
-                        y=upper_b + lower_b[::-1],
-                        fill='toself', fillcolor='rgba(37, 99, 235, 0.1)',
-                        line=dict(color='rgba(255,255,255,0)'), name='95% CI'
-                    ))
+                        # Historical Line
+                        fig_fc.add_trace(go.Scatter(
+                            x=hist_sample['date'], y=hist_sample['demand'],
+                            mode='lines', name='Actual Demand', line=dict(color='#64748B', width=2)
+                        ))
+                        # Predicted Line
+                        fig_fc.add_trace(go.Scatter(
+                            x=future_dates, y=preds,
+                            mode='lines', name='AI Predicted Demand', line=dict(color='#2563EB', width=2.5, dash='dash')
+                        ))
+                        # Confidence Envelope
+                        fig_fc.add_trace(go.Scatter(
+                            x=future_dates.tolist() + future_dates.tolist()[::-1],
+                            y=upper_b + lower_b[::-1],
+                            fill='toself', fillcolor='rgba(37, 99, 235, 0.1)',
+                            line=dict(color='rgba(255,255,255,0)'), name='95% Prediction Interval'
+                        ))
                     fig_fc.update_layout(
                         margin=dict(l=15, r=15, t=15, b=15), height=320,
                         template='plotly_white', paper_bgcolor='rgba(0,0,0,0)',
@@ -1500,14 +1482,14 @@ elif active_tab == nav_options[3]:
 
     pcol1, pcol2, pcol3 = st.columns(3)
     preset_prompt = None
-    if pcol1.button("🔍 Which SKUs are at highest risk?", use_container_width=True):
-        preset_prompt = "Which SKUs are at highest risk?"
-    if pcol2.button("📈 Forecast demand for S001", use_container_width=True):
-        preset_prompt = "Forecast demand for Store S001"
-    if pcol3.button("📦 Recommend orders for Groceries", use_container_width=True):
+    if pcol1.button("🔍 High-Risk SKUs Query", use_container_width=True):
+        preset_prompt = "Which SKUs are at highest risk across the network?"
+    if pcol2.button("📈 Run Agent on S001 / P0001", use_container_width=True):
+        preset_prompt = "Generate demand forecast and reorder policy for Store S001 Product P0001"
+    if pcol3.button("📦 Category Groceries Policy", use_container_width=True):
         preset_prompt = "Recommend orders for Category Groceries"
 
-    user_input = st.chat_input("Ask about inventory, forecasts, or policies...") or preset_prompt
+    user_input = st.chat_input("Ask about inventory, forecasts, or policies (e.g., 'Analyze Store S001 Product P0001')...") or preset_prompt
     if user_input:
         st.session_state.chat_history.append({"role": "user", "content": user_input, "reasoning_steps": None})
         with st.chat_message("user", avatar="👤"):
@@ -1515,45 +1497,77 @@ elif active_tab == nav_options[3]:
 
         with st.chat_message("assistant", avatar="🤖"):
             q_lower = user_input.lower()
-            if "high" in q_lower or "risk" in q_lower or "stockout" in q_lower:
+            response_text = ""
+            reasoning_steps = []
+
+            # Check if query targets a specific store and SKU
+            has_sku = re.search(r'\b(P\d{4})\b', user_input, re.IGNORECASE) or re.search(r'\b(S\d{3})\b', user_input, re.IGNORECASE)
+
+            if has_sku and API_URL:
+                try:
+                    resp = requests.post(f"{API_URL}/agent/query", json={"query": user_input}, timeout=15)
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        response_text = data.get("answer", "Agent executed successfully.")
+                        r_chain = data.get("reasoning_chain", {})
+                        if r_chain:
+                            if r_chain.get("forecast_explanation"):
+                                reasoning_steps.append(f"**Forecast Agent:** {r_chain['forecast_explanation']}")
+                            if r_chain.get("risk_reasoning"):
+                                reasoning_steps.append(f"**Risk Agent:** {r_chain['risk_reasoning']}")
+                            if r_chain.get("reorder_reasoning"):
+                                reasoning_steps.append(f"**Reorder Agent:** {r_chain['reorder_reasoning']}")
+                    elif resp.status_code == 400:
+                        detail = resp.json().get("detail", "Bad Request")
+                        response_text = f"⚠️ {detail}"
+                    else:
+                        response_text = f"Backend agent error (HTTP {resp.status_code}): {resp.text}"
+                except Exception as e:
+                    # If backend API is unreachable, fall back to direct module execution if BACKEND_AVAILABLE
+                    if BACKEND_AVAILABLE:
+                        try:
+                            from backend.api.agent_routes import parse_intent
+                            from backend.agents.graph import run_agent_pipeline
+                            import uuid
+                            entities = parse_intent(user_input)
+                            thread_id = str(uuid.uuid4())
+                            state = run_agent_pipeline(entities.store_id, entities.product_id, thread_id)
+                            response_text = f"Forecast and reorder plan generated for {entities.product_id} at Store {entities.store_id}: Risk assessed as **{state.get('risk_level')}**. {state.get('reorder_reasoning', '')}"
+                            if state.get("explanation"):
+                                reasoning_steps.append(f"**Forecast Agent:** {state['explanation']}")
+                            if state.get("risk_reasoning"):
+                                reasoning_steps.append(f"**Risk Agent:** {state['risk_reasoning']}")
+                            if state.get("reorder_reasoning"):
+                                reasoning_steps.append(f"**Reorder Agent:** {state['reorder_reasoning']}")
+                        except Exception as inner_e:
+                            response_text = f"Unable to process query: {inner_e}"
+                    else:
+                        response_text = f"Could not connect to backend agent API at {API_URL}: {e}"
+            elif "high" in q_lower or "risk" in q_lower or "stockout" in q_lower:
                 high_items = reorder_df[reorder_df['risk_level'] == 'HIGH']
                 if not high_items.empty:
                     top3 = high_items.head(3)
-                    items_str = "\n".join([f"- 🚨 **{r['product_id']} in {r['store_id']}:** {int(r['inventory_level'])} units left (ROP: {r['reorder_point']:.0f}). Recommended EOQ: +{r['economic_order_qty']} units." for _, r in top3.iterrows()])
+                    items_str = "\n".join([f"- 🚨 **{r['product_id']} in {r['store_id']}:** {int(r['inventory_level'])} units left (ROP: {r['reorder_point']:.0f}). Recommended EOQ: +{r['recommended_qty']} units." for _, r in top3.iterrows()])
                     response_text = f"Identified **{len(high_items)} SKUs** at **HIGH stockout risk** across the store network:\n{items_str}"
                 else:
                     response_text = "All store SKUs are currently maintaining inventory levels above required safety stock thresholds."
                 reasoning_steps = [
                     "**1. Intent Resolution:** Query high risk SKUs across network",
-                    "**2. DB Query:** SELECT * FROM inventory WHERE stock < rop",
-                    "**3. Risk Evaluation:** Applied SS = 1.65 × σd × √L and ROP = (d × L) + SS",
-                    "**4. Synthesis:** Formulated replenishment recommendations with calculated EOQ."
+                    "**2. Database Filter:** Evaluated inventory levels against calculated Reorder Points (ROP)",
+                    f"**3. Synthesis:** Flagged {len(high_items)} SKUs requiring replenishment."
                 ]
-            elif "groceries" in q_lower or "category" in q_lower or "electronics" in q_lower:
-                cat_name = "Groceries" if "groceries" in q_lower else ("Electronics" if "electronics" in q_lower else df['category'].iloc[0])
+            elif "groceries" in q_lower or "category" in q_lower or "electronics" in q_lower or "clothing" in q_lower:
+                cat_name = "Groceries" if "groceries" in q_lower else ("Electronics" if "electronics" in q_lower else ("Clothing" if "clothing" in q_lower else df['category'].iloc[0]))
                 cat_df = reorder_df[reorder_df['category'].str.lower() == cat_name.lower()]
                 total_rec = cat_df['recommended_qty'].sum()
                 response_text = f"For **{cat_name}**, aggregate recommended reorder volume across all stores is **{total_rec:,} units**. Active stockout risk detected on **{len(cat_df[cat_df['risk_level'] == 'HIGH'])}** SKUs in this category."
                 reasoning_steps = [
-                    f"**1. Filter:** Selected category `{cat_name}` from catalog",
-                    "**2. Aggregation:** Evaluated inventory buffers across stores",
-                    "**3. Optimization:** Calculated Economic Order Quantity batch sizes."
+                    f"**1. Catalog Filter:** Extracted SKUs for category `{cat_name}`",
+                    "**2. Aggregation:** Computed aggregate replenishment demand",
+                    "**3. Policy:** Applied Economic Order Quantity batch sizing."
                 ]
             else:
-                matched_store = "S001"
-                for s in df['store_id'].unique():
-                    if s.lower() in q_lower:
-                        matched_store = s
-                        break
-                store_skus = reorder_df[reorder_df['store_id'] == matched_store]
-                high_s = len(store_skus[store_skus['risk_level'] == 'HIGH'])
-                avg_demand = store_skus['demand'].mean()
-                response_text = f"Telemetry for Store **{matched_store}**: Daily demand averages **{avg_demand:.1f} units/SKU**. There are currently **{high_s} SKUs** requiring replenishment orders to prevent stockouts over the 7-day supplier lead time."
-                reasoning_steps = [
-                    f"**1. Resolution:** Identified store identifier `{matched_store}`",
-                    "**2. Model Prediction:** Computed multi-step XGBoost projection",
-                    "**3. Inventory Policy:** Evaluated safety buffers and reorder thresholds."
-                ]
+                response_text = "Please specify a Store ID (e.g. `S001`) and Product ID (e.g. `P0001`) to run the multi-agent forecasting and optimization pipeline, or ask about network-level risk."
 
             st.markdown(response_text)
             if reasoning_steps:

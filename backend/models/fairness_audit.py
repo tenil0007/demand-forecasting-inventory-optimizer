@@ -58,18 +58,21 @@ def compute_subgroup_metrics(
     y_true_col: str,
     y_pred_col: str,
     overall_mape: float,
-    threshold: float = DEFAULT_DEGRADATION_THRESHOLD
+    threshold: float = DEFAULT_DEGRADATION_THRESHOLD,
+    min_sample_size: int = 30
 ) -> List[Dict[str, Any]]:
     """
     Evaluates forecast accuracy and inventory optimization metrics grouped by a column.
+    If a subgroup has fewer than min_sample_size records, marks it as 'insufficient_sample_size'.
     """
     subgroup_results = []
     
     for group_val, group_df in df_eval.groupby(group_col):
         y_true = group_df[y_true_col].values
         y_pred = group_df[y_pred_col].values
+        sample_count = len(y_true)
         
-        if len(y_true) == 0:
+        if sample_count == 0:
             continue
             
         sub_mape = float(mean_absolute_percentage_error(y_true, y_pred))
@@ -78,8 +81,15 @@ def compute_subgroup_metrics(
         
         # Calculate relative degradation compared to overall baseline
         rel_degradation = (sub_mape - overall_mape) / overall_mape if overall_mape > 0 else 0.0
-        is_flagged = bool(rel_degradation > threshold)
-        status = "requires_review" if is_flagged else "nominal"
+        
+        if sample_count < min_sample_size:
+            is_flagged = False
+            status = "insufficient_sample_size"
+            sample_size_warning = True
+        else:
+            is_flagged = bool(rel_degradation > threshold)
+            status = "requires_review" if is_flagged else "nominal"
+            sample_size_warning = False
         
         # Optimization policy analysis on the subgroup
         mean_demand = float(np.mean(y_true))
@@ -94,18 +104,19 @@ def compute_subgroup_metrics(
         
         subgroup_results.append({
             "segment": str(group_val),
-            "sample_count": int(len(group_df)),
+            "sample_count": int(sample_count),
             "mape": round(sub_mape, 4),
             "rmse": round(sub_rmse, 3),
             "mae": round(sub_mae, 3),
             "relative_degradation_pct": round(rel_degradation * 100, 1),
+            "is_flagged": is_flagged,
+            "status": status,
+            "sample_size_warning": sample_size_warning,
             "avg_actual_demand": round(mean_demand, 2),
             "avg_predicted_demand": round(float(np.mean(y_pred)), 2),
             "avg_safety_stock": round(ss, 1),
             "avg_reorder_point": round(rop, 1),
-            "avg_recommended_eoq": round(eoq, 1),
-            "status": status,
-            "is_flagged": is_flagged
+            "avg_recommended_eoq": round(eoq, 1)
         })
         
     # Sort by MAPE descending so worst-performing segments are on top

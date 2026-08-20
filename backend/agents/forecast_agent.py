@@ -35,13 +35,20 @@ def forecast_node(state: AgentState) -> dict:
     forecast_results = model.predict(store_id, product_id)
     
     # Try to get an explanation from Ollama
+    safe_forecast = {
+        "dates": forecast_results.get("dates", []),
+        "predicted_demand": forecast_results.get("predicted_demand", []),
+        "lower_bound": forecast_results.get("lower_bound", []),
+        "upper_bound": forecast_results.get("upper_bound", [])
+    }
     explanation = ""
+    explanation_available = False
     try:
         sku_label = wrap_user_content(f"Store {store_id}, Product {product_id}")
         prompt = (
             f"Explain this demand forecast for the store and product identified below:\n"
             f"{sku_label}\n"
-            f"Forecast data:\n{json.dumps(forecast_results, indent=2)}\n"
+            f"Forecast data:\n{json.dumps(safe_forecast, indent=2)}\n"
             f"Keep it brief and actionable."
         )
         
@@ -57,11 +64,15 @@ def forecast_node(state: AgentState) -> dict:
         )
         response.raise_for_status()
         explanation = response.json().get("response", "")
+        explanation_available = bool(explanation)
     except Exception as e:
-        # Fallback to deterministic SHAP explanation
-        explanation = model.explain_forecast(store_id=store_id, product_id=product_id)
+        import logging
+        logging.getLogger(__name__).warning(f"Ollama explanation call failed in forecast agent: {e}")
+        explanation = "LLM explanation unavailable (Ollama offline)."
+        explanation_available = False
 
     return {
         "forecast": forecast_results,
-        "explanation": str(explanation)
+        "explanation": str(explanation),
+        "explanation_available": explanation_available
     }

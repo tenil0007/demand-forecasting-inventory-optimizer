@@ -31,32 +31,43 @@ ARTIFACTS_DIR = BASE_DIR / "artifacts"
 ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
 
 
-def simulate_naive_policy(sku_data, static_rop=50, fixed_order_qty=100):
+def simulate_naive_policy(sku_data, static_rop=50, fixed_order_qty=100, lead_time=LEAD_TIME_DAYS):
     """
-    Naive policy: reorder a fixed quantity when inventory drops below a static threshold.
+    Naive policy: reorder a fixed quantity when inventory position drops below a static threshold,
+    with realistic lead-time pipeline delay.
     """
     results = []
-    inventory = sku_data.iloc[0][COL_INVENTORY_LEVEL]
+    inventory = float(sku_data.iloc[0][COL_INVENTORY_LEVEL])
+    pending_orders = []  # list of (arrival_day_idx, qty)
 
-    for _, row in sku_data.iterrows():
-        demand = row[COL_DEMAND]
-        price = row[COL_PRICE]
+    for day_idx, (_, row) in enumerate(sku_data.iterrows()):
+        # 1. Arriving orders
+        arrived_qty = sum(qty for arr_idx, qty in pending_orders if arr_idx == day_idx)
+        inventory += arrived_qty
+        pending_orders = [(arr_idx, qty) for arr_idx, qty in pending_orders if arr_idx > day_idx]
 
-        # Fulfill what we can
+        demand = float(row[COL_DEMAND])
+        price = float(row[COL_PRICE])
+
+        # 2. Customer fulfillment
         fulfilled = min(inventory, demand)
-        stockout_units = max(0, demand - inventory)
+        stockout_units = max(0.0, demand - inventory)
         lost_sales = stockout_units * price
 
-        # Update inventory
-        inventory = max(0, inventory - demand)
+        # 3. End-of-day physical inventory
+        inventory = max(0.0, inventory - demand)
 
-        # Reorder decision: static threshold
+        # 4. Inventory position = on_hand + on_order
+        on_order = sum(qty for _, qty in pending_orders)
+        inv_position = inventory + on_order
+
+        # 5. Order decision
         ordered = 0
-        if inventory <= static_rop:
+        if inv_position <= static_rop:
             ordered = fixed_order_qty
-            inventory += ordered
+            pending_orders.append((day_idx + lead_time, ordered))
 
-        holding = inventory * price * HOLDING_COST_PERCENT / 365
+        holding = inventory * price * HOLDING_COST_PERCENT / 365.0
 
         results.append({
             'date': row[COL_DATE],
@@ -66,50 +77,64 @@ def simulate_naive_policy(sku_data, static_rop=50, fixed_order_qty=100):
             'lost_sales': lost_sales,
             'inventory': inventory,
             'ordered': ordered,
-            'order_cost': ORDER_COST if ordered > 0 else 0,
+            'order_cost': ORDER_COST if ordered > 0 else 0.0,
             'holding_cost': holding
         })
 
     return pd.DataFrame(results)
 
 
-def simulate_agent_policy(sku_data):
+def simulate_agent_policy(sku_data, lead_time=LEAD_TIME_DAYS):
     """
-    Agent policy: dynamic ROP/EOQ driven by rolling demand statistics and safety stock.
+    Agent policy: dynamic ROP/EOQ driven by rolling demand statistics, service level,
+    and realistic lead-time pipeline delay.
     """
     results = []
-    inventory = sku_data.iloc[0][COL_INVENTORY_LEVEL]
+    inventory = float(sku_data.iloc[0][COL_INVENTORY_LEVEL])
+    pending_orders = []  # list of (arrival_day_idx, qty)
     demand_history = []
 
-    for _, row in sku_data.iterrows():
-        demand = row[COL_DEMAND]
-        price = row[COL_PRICE]
+    for day_idx, (_, row) in enumerate(sku_data.iterrows()):
+        # 1. Arriving orders
+        arrived_qty = sum(qty for arr_idx, qty in pending_orders if arr_idx == day_idx)
+        inventory += arrived_qty
+        pending_orders = [(arr_idx, qty) for arr_idx, qty in pending_orders if arr_idx > day_idx]
+
+        demand = float(row[COL_DEMAND])
+        price = float(row[COL_PRICE])
         demand_history.append(demand)
 
-        # Compute dynamic stats from recent history
+        # 2. Compute dynamic stats strictly from past observed history
         recent = demand_history[-28:] if len(demand_history) >= 7 else demand_history
-        avg_demand = np.mean(recent)
-        std_demand = np.std(recent) if len(recent) > 1 else avg_demand * 0.3
+        avg_demand = float(np.mean(recent))
+        std_demand = float(np.std(recent)) if len(recent) > 1 else max(avg_demand * 0.2, 1.0)
 
-        # Dynamic optimization
-        ss = safety_stock(std_demand, LEAD_TIME_DAYS, SERVICE_LEVEL_Z)
-        rop = reorder_point(avg_demand, LEAD_TIME_DAYS, ss)
-        annual_demand = avg_demand * 365
-        holding_cost_unit = price * HOLDING_COST_PERCENT
+        # 3. Dynamic optimization formulas
+        ss = safety_stock(std_demand, lead_time, SERVICE_LEVEL_Z)
+        rop = reorder_point(avg_demand, lead_time, ss)
+        annual_demand = max(avg_demand * 365.0, 1.0)
+        holding_cost_unit = max(price * HOLDING_COST_PERCENT, 0.01)
         eoq = economic_order_quantity(annual_demand, ORDER_COST, holding_cost_unit)
 
+        # 4. Customer fulfillment
         fulfilled = min(inventory, demand)
-        stockout_units = max(0, demand - inventory)
+        stockout_units = max(0.0, demand - inventory)
         lost_sales = stockout_units * price
 
-        inventory = max(0, inventory - demand)
+        # 5. End-of-day physical inventory
+        inventory = max(0.0, inventory - demand)
 
+        # 6. Inventory position = on_hand + on_order
+        on_order = sum(qty for _, qty in pending_orders)
+        inv_position = inventory + on_order
+
+        # 7. Dynamic order decision
         ordered = 0
-        if inventory <= rop:
-            ordered = max(int(eoq), 10)
-            inventory += ordered
+        if inv_position <= rop:
+            ordered = max(int(round(eoq)), 10)
+            pending_orders.append((day_idx + lead_time, ordered))
 
-        holding = inventory * price * HOLDING_COST_PERCENT / 365
+        holding = inventory * price * HOLDING_COST_PERCENT / 365.0
 
         results.append({
             'date': row[COL_DATE],
@@ -119,7 +144,7 @@ def simulate_agent_policy(sku_data):
             'lost_sales': lost_sales,
             'inventory': inventory,
             'ordered': ordered,
-            'order_cost': ORDER_COST if ordered > 0 else 0,
+            'order_cost': ORDER_COST if ordered > 0 else 0.0,
             'holding_cost': holding,
             'dynamic_rop': rop,
             'dynamic_ss': ss,
