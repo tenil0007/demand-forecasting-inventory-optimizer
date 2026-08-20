@@ -18,8 +18,8 @@ sys.path.insert(0, os.getcwd())
 def test_disabled_mode():
     """Scenario 1: No keys set → observability is a no-op, zero overhead."""
     # Force disabled
-    os.environ.pop("LANGFUSE_PUBLIC_KEY", None)
-    os.environ.pop("LANGFUSE_SECRET_KEY", None)
+    os.environ["LANGFUSE_PUBLIC_KEY"] = ""
+    os.environ["LANGFUSE_SECRET_KEY"] = ""
 
     # Re-import with clean state
     import importlib
@@ -58,8 +58,8 @@ def test_disabled_mode():
 
 def test_error_propagation():
     """Scenario 3: Ollama down → exception re-raised after span closes as error."""
-    os.environ.pop("LANGFUSE_PUBLIC_KEY", None)
-    os.environ.pop("LANGFUSE_SECRET_KEY", None)
+    os.environ["LANGFUSE_PUBLIC_KEY"] = ""
+    os.environ["LANGFUSE_SECRET_KEY"] = ""
 
     import importlib
     import backend.config
@@ -153,16 +153,16 @@ def test_enabled_mode_with_real_client():
     print(f"   Trace type:  {type(trace).__name__}")
 
     # Clean up
-    os.environ.pop("LANGFUSE_PUBLIC_KEY", None)
-    os.environ.pop("LANGFUSE_SECRET_KEY", None)
+    os.environ["LANGFUSE_PUBLIC_KEY"] = ""
+    os.environ["LANGFUSE_SECRET_KEY"] = ""
     os.environ.pop("LANGFUSE_HOST", None)
     obs._langfuse_client = None
 
 
 def test_no_flush_per_request():
     """Verify shutdown_langfuse doesn't crash when disabled."""
-    os.environ.pop("LANGFUSE_PUBLIC_KEY", None)
-    os.environ.pop("LANGFUSE_SECRET_KEY", None)
+    os.environ["LANGFUSE_PUBLIC_KEY"] = ""
+    os.environ["LANGFUSE_SECRET_KEY"] = ""
 
     import importlib
     import backend.config

@@ -4,6 +4,7 @@ from fastapi import APIRouter, HTTPException, Query
 from typing import Optional
 from backend.models.forecast_model import ForecastModel
 from backend.config import OLLAMA_BASE_URL, OLLAMA_MODEL
+from backend.security.prompt_guard import wrap_user_content, validate_entity_id, STORE_ID_RE, PRODUCT_ID_RE
 
 router = APIRouter()
 model = ForecastModel()
@@ -20,12 +21,27 @@ def get_forecast(
     Returns the forecast, confidence intervals, and an LLM-generated explanation.
     """
     try:
+        # Validate user-controlled path params before they enter any prompt
+        try:
+            validate_entity_id(store_id, STORE_ID_RE, "store_id")
+            validate_entity_id(product_id, PRODUCT_ID_RE, "product_id")
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+
         # Get prediction from the model
         forecast_results = model.predict(store_id, product_id)
         
         # Optionally, generate explanation using Ollama
+        # TODO: This Ollama call bypasses traced_ollama_call() — align with
+        # observability wrapper in a follow-up.
         explanation = ""
-        prompt = f"Explain this demand forecast for Store {store_id}, Product {product_id}:\n{json.dumps(forecast_results, indent=2)}\nKeep it brief and actionable."
+        sku_label = wrap_user_content(f"Store {store_id}, Product {product_id}")
+        prompt = (
+            f"Explain this demand forecast for the store and product identified below:\n"
+            f"{sku_label}\n"
+            f"Forecast data:\n{json.dumps(forecast_results, indent=2)}\n"
+            f"Keep it brief and actionable."
+        )
         
         try:
             response = httpx.post(

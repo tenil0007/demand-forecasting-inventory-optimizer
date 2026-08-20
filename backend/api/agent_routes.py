@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException
 from backend.agents.graph import run_agent_pipeline
 from backend.config import OLLAMA_BASE_URL, OLLAMA_MODEL
 from backend.observability import traced_ollama_call
+from backend.security.prompt_guard import wrap_user_content, validate_entity_id, STORE_ID_RE, PRODUCT_ID_RE
 
 router = APIRouter()
 
@@ -16,7 +17,11 @@ def parse_intent(query: str):
     """
     Parse the user's natural language query to extract store_id and product_id.
     """
-    prompt = f"Extract the store_id and product_id from this query: '{query}'. Return ONLY a JSON object with 'store_id' and 'product_id' keys."
+    prompt = (
+        "Extract the store_id and product_id from the user query below. "
+        "Return ONLY a JSON object with 'store_id' and 'product_id' keys.\n"
+        f"{wrap_user_content(query)}"
+    )
     
     try:
         response = traced_ollama_call(
@@ -45,9 +50,9 @@ def parse_intent(query: str):
     product_id = "P001"
     for i, word in enumerate(words):
         if word.lower() in ["store", "store_id"] and i + 1 < len(words):
-            store_id = words[i+1].strip(",.")
+            store_id = words[i+1].strip(",.?!;:'\"")
         if word.lower() in ["product", "product_id"] and i + 1 < len(words):
-            product_id = words[i+1].strip(",.")
+            product_id = words[i+1].strip(",.?!;:'\"")
             
     return {"store_id": store_id, "product_id": product_id}
 
@@ -61,6 +66,12 @@ def agent_query_post(req: QueryRequest):
         intent = parse_intent(req.query)
         store_id = intent.get("store_id", "S001")
         product_id = intent.get("product_id", "P001")
+        
+        try:
+            validate_entity_id(store_id, STORE_ID_RE, "store_id")
+            validate_entity_id(product_id, PRODUCT_ID_RE, "product_id")
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
         
         thread_id = str(uuid.uuid4())
         state = run_agent_pipeline(store_id, product_id, thread_id)
@@ -91,6 +102,12 @@ def agent_query_get(store_id: str, product_id: str):
     Pauses at the interrupt and returns the thread_id + pending recommendation.
     """
     try:
+        try:
+            validate_entity_id(store_id, STORE_ID_RE, "store_id")
+            validate_entity_id(product_id, PRODUCT_ID_RE, "product_id")
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        
         thread_id = f"{store_id}_{product_id}_{uuid.uuid4().hex[:8]}"
         state = run_agent_pipeline(store_id, product_id, thread_id)
         

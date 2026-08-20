@@ -62,6 +62,7 @@
 |  - Tab 3: Replenishment Queue (Action Table & Interactive HITL Review Panel)      |
 |  - Tab 4: Agent Chat (Copilot with Step-by-Step LangGraph Reasoning Traces)       |
 |  - Tab 5: Audit Trail (Governance Compliance & Decision History)                  |
+|  - Tab 6: Fairness & Bias (Subgroup Performance Breakdown & Disparity Audit)      |
 +-----------------------------------------------------------------------------------+
 ```
 
@@ -168,7 +169,7 @@ Instead of relying solely on raw forecasts, predictions feed directly into mathe
 > **Answer**: *"Most projects stop at predicting a number. NexusSupply is an actionable decision system. It translates predictions into optimal operational decisions (EOQ order batches and ROP triggers), flags risk categories, provides SHAP explainability, and enforces Human-in-the-Loop governance with an immutable audit trail."*
 
 ### Q3: "How does your system implement Responsible AI?"
-> **Answer**: *"We enforce 4 core pillars: (1) **Explainability** via SHAP bar charts, (2) **Uncertainty bounds** via 95% confidence envelopes, (3) **Human-in-the-Loop** gates so AI cannot execute high-risk purchase orders without human manager approval, and (4) **Immutability** through database-backed audit logging."*
+> **Answer**: *"We enforce 5 core pillars: (1) **Explainability** via real TreeExplainer SHAP attribution bar charts, (2) **Uncertainty bounds** via 95% confidence envelopes, (3) **Fairness & Subgroup Auditing** (`fairness_audit.py`) monitoring MAPE and inventory policy parity across regions, categories, and stores with a +25% degradation threshold, (4) **Human-in-the-Loop** gates so AI cannot execute high-risk purchase orders without human manager approval, and (5) **Immutability** through database-backed audit logging."*
 
 ### Q4: "What trade-offs did you make and what would you improve next?"
 > **Answer**: *"Our primary trade-off was prioritizing deterministic low-latency tree models (XGBoost) over complex foundation models. Given more compute and data, I would implement multi-echelon network optimization (warehouse-to-store rebalancing) and real-time Kafka event streaming."*

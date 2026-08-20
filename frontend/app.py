@@ -658,6 +658,18 @@ def fetch_metrics():
             pass
     return {"mape": 18.6, "rmse": 6.71, "mae": 5.10}
 
+@st.cache_data(ttl=300)
+def fetch_fairness_audit():
+    """Reads genuine subgroup fairness audit from artifacts."""
+    audit_path = os.path.join(root_dir, "artifacts", "fairness_audit.json")
+    if os.path.exists(audit_path):
+        try:
+            with open(audit_path, 'r') as f:
+                return json.load(f)
+        except Exception:
+            return None
+    return None
+
 def process_reorder_data(df):
     """Calculates SKU-level replenishment recommendations and risk status directly from the dataset."""
     if df.empty:
@@ -836,7 +848,8 @@ with st.sidebar:
         "🔮  Forecast Explorer",
         "📦  Replenishment",
         "💬  Agent Chat",
-        "🛡️  Audit Trail"
+        "🛡️  Audit Trail",
+        "⚖️  Fairness & Bias"
     ]
     active_tab = st.radio("Navigation", nav_options, label_visibility="collapsed")
 
@@ -1105,23 +1118,72 @@ elif active_tab == nav_options[1]:
                 <p style="font-size: 12px; color: #64748B; margin: 0 0 14px 0;">Primary drivers behind XGBoost demand projection</p>
                 ''', unsafe_allow_html=True)
 
-                shap_names = ['Recent 7-Day Velocity', 'Active Promo', 'Weekend Pattern', 'Weather Shock', 'Competitor Price Gap']
-                shap_impacts = [3.8, 2.4, 2.1, -0.9, -1.5]
-                shap_colors = ['#10B981' if v > 0 else '#EF4444' for v in shap_impacts]
+                shap_data = []
+                if ForecastModel is not None:
+                    try:
+                        fmodel_shap = ForecastModel()
+                        shap_data = fmodel_shap.explain_forecast(
+                            store_id=store_sel,
+                            product_id=prod_sel,
+                            return_structured=True,
+                            top_k=5
+                        )
+                    except Exception:
+                        shap_data = []
 
-                fig_shap = go.Figure(go.Bar(
-                    x=shap_impacts, y=shap_names, orientation='h',
-                    marker_color=shap_colors,
-                    text=[f"{'+' if v > 0 else ''}{v:.1f}" for v in shap_impacts],
-                    textposition='outside'
-                ))
-                fig_shap.update_layout(
-                    margin=dict(l=10, r=25, t=10, b=10), height=340,
-                    template='plotly_white', paper_bgcolor='rgba(0,0,0,0)',
-                    xaxis=dict(showgrid=True, gridcolor='#F1F5F9', title="", zeroline=True, zerolinecolor='#CBD5E1'),
-                    yaxis=dict(autorange="reversed")
-                )
-                st.plotly_chart(fig_shap, use_container_width=True, config={'displayModeBar': False})
+                if shap_data:
+                    FEATURE_DISPLAY_NAMES = {
+                        "demand_lag_1": "1-Day Demand Lag",
+                        "demand_lag_7": "7-Day Demand Lag",
+                        "demand_lag_14": "14-Day Demand Lag",
+                        "demand_lag_28": "28-Day Demand Lag",
+                        "demand_rolling_mean_7": "Recent 7-Day Velocity",
+                        "demand_rolling_std_7": "7-Day Volatility",
+                        "demand_rolling_mean_28": "28-Day Demand Velocity",
+                        "demand_rolling_std_28": "28-Day Volatility",
+                        "price_discount_ratio": "Discount Impact",
+                        "price_competitor_ratio": "Competitor Price Gap",
+                        "Price": "Base Price",
+                        "Competitor Pricing": "Competitor Price",
+                        "Promotion": "Active Promo",
+                        "Epidemic": "Epidemic / Disruption",
+                        "seasonality_encoded": "Seasonal Factor",
+                        "is_weekend": "Weekend Pattern",
+                        "day_of_week": "Day of Week",
+                        "month": "Month Trend",
+                        "quarter": "Quarter Cycle",
+                        "weather_Sunny": "Sunny Weather",
+                        "weather_Rainy": "Rainy Weather",
+                        "weather_Cloudy": "Cloudy Weather",
+                        "weather_Snowy": "Snowy Weather",
+                        "weather_Stormy": "Weather Shock (Storm)",
+                    }
+
+                    shap_names = [
+                        FEATURE_DISPLAY_NAMES.get(item["feature"], item["feature"].replace("_", " ").title())
+                        for item in shap_data
+                    ]
+                    shap_impacts = [
+                        item.get("signed_impact", item.get("impact", 0.0))
+                        for item in shap_data
+                    ]
+                    shap_colors = ['#10B981' if v >= 0 else '#EF4444' for v in shap_impacts]
+
+                    fig_shap = go.Figure(go.Bar(
+                        x=shap_impacts, y=shap_names, orientation='h',
+                        marker_color=shap_colors,
+                        text=[f"{'+' if v >= 0 else ''}{v:.2f}" for v in shap_impacts],
+                        textposition='outside'
+                    ))
+                    fig_shap.update_layout(
+                        margin=dict(l=10, r=35, t=10, b=10), height=340,
+                        template='plotly_white', paper_bgcolor='rgba(0,0,0,0)',
+                        xaxis=dict(showgrid=True, gridcolor='#F1F5F9', title="", zeroline=True, zerolinecolor='#CBD5E1'),
+                        yaxis=dict(autorange="reversed")
+                    )
+                    st.plotly_chart(fig_shap, use_container_width=True, config={'displayModeBar': False})
+                else:
+                    st.info("Explanation unavailable for this selection.")
 
 # ═════════════════════════════════════════════════════════════════════════════
 # TAB 3: REPLENISHMENT
@@ -1460,3 +1522,127 @@ elif active_tab == nav_options[4]:
 </table>
 </div>"""
         render_html(audit_html)
+
+# ═════════════════════════════════════════════════════════════════════════════
+# TAB 6: FAIRNESS & BIAS AUDIT
+# ═════════════════════════════════════════════════════════════════════════════
+elif active_tab == nav_options[5]:
+    fairness_data = fetch_fairness_audit()
+
+    if fairness_data is None:
+        st.warning("⚠️ Fairness audit report not found. Run `python backend/models/fairness_audit.py` to compute and generate artifacts/fairness_audit.json.")
+    else:
+        overall = fairness_data.get("overall_metrics", {})
+        summary = fairness_data.get("summary", {})
+        thresh = fairness_data.get("degradation_threshold_pct", 25.0)
+        flagged_count = summary.get("flagged_subgroups_count", 0)
+
+        # ── KPI Cards ─────────────────────────────────────────────────────────
+        fk1, fk2, fk3, fk4 = st.columns(4)
+        with fk1:
+            render_html(f'''
+            <div class="kpi-card">
+                <div class="kpi-card-label">Overall Test MAPE</div>
+                <div class="kpi-card-value">{overall.get("MAPE", 0) * 100:.1f}%</div>
+            </div>
+            ''')
+        with fk2:
+            render_html(f'''
+            <div class="kpi-card">
+                <div class="kpi-card-label">Degradation Threshold</div>
+                <div class="kpi-card-value">+{thresh:.0f}% <span style="font-size: 13px; font-weight: 400; color: #64748B;">Rel.</span></div>
+            </div>
+            ''')
+        with fk3:
+            render_html(f'''
+            <div class="kpi-card">
+                <div class="kpi-card-label">Subgroups Audited</div>
+                <div class="kpi-card-value">{summary.get("total_subgroups_audited", 0)}</div>
+            </div>
+            ''')
+        with fk4:
+            val_class = "text-emerald" if flagged_count == 0 else "text-red"
+            status_text = "0 Flagged" if flagged_count == 0 else f"{flagged_count} Flagged"
+            render_html(f'''
+            <div class="kpi-card">
+                <div class="kpi-card-label">Fairness Status</div>
+                <div class="kpi-card-value {val_class}">{status_text}</div>
+            </div>
+            ''')
+
+        st.markdown("<div style='height: 12px;'></div>", unsafe_allow_html=True)
+
+        render_html(f'''
+        <div class="info-box">
+            <div class="info-box-icon">{ICON_INFO}</div>
+            <div class="info-box-text">
+                <strong>Subgroup Fairness & Governance Audit:</strong> Evaluates XGBoost forecast accuracy and inventory optimization parameters across Geographic (Region), Product (Category), and Operational (Store ID) segments on held-out test records. Segments with relative MAPE degradation exceeding <strong>+{thresh:.0f}%</strong> are flagged for review.
+            </div>
+        </div>
+        ''')
+
+        st.markdown("<div style='height: 12px;'></div>", unsafe_allow_html=True)
+
+        subgroups = fairness_data.get("subgroups", {})
+        dim_choice = st.radio(
+            "Select Subgroup Dimension:",
+            ["Geographic (Region)", "Product Category", "Store Location"],
+            horizontal=True
+        )
+
+        if dim_choice == "Geographic (Region)":
+            active_list = subgroups.get("by_region", [])
+            dim_title = "Regional Geographic Parity"
+        elif dim_choice == "Product Category":
+            active_list = subgroups.get("by_category", [])
+            dim_title = "Product Category Performance Breakdown"
+        else:
+            active_list = subgroups.get("by_store", [])
+            dim_title = "Store-Level Operational Performance"
+
+        if active_list:
+            rows_html = ""
+            for item in active_list:
+                is_flagged = item.get("is_flagged", False)
+                rel_deg = item.get("relative_degradation_pct", 0.0)
+                rel_color = "#DC2626" if rel_deg > 0 else "#10B981"
+                badge_html = '<span class="badge badge-red">Requires Review</span>' if is_flagged else '<span class="badge badge-green">Nominal</span>'
+                row_bg = "background: rgba(239, 68, 68, 0.06);" if is_flagged else ""
+
+                rows_html += f"""<tr style="{row_bg}">
+<td style="font-weight: 600; color: #0F172A;">{item.get('segment')}</td>
+<td class="muted">{item.get('sample_count')}</td>
+<td style="font-weight: 600;">{item.get('mape', 0) * 100:.2f}%</td>
+<td style="color: {rel_color}; font-weight: 500;">{'+' if rel_deg > 0 else ''}{rel_deg:.1f}%</td>
+<td class="muted">{item.get('avg_actual_demand', 0):.1f} / day</td>
+<td class="muted">{item.get('avg_reorder_point', 0):.0f} units</td>
+<td class="primary">+{item.get('avg_recommended_eoq', 0):.0f} units</td>
+<td>{badge_html}</td>
+</tr>"""
+
+            table_fairness = f"""<div class="nexus-table-wrapper">
+<div class="nexus-table-header">
+<span style="font-weight: 600; font-size: 14px; color: #0F172A;">{dim_title}</span>
+</div>
+<table class="nexus-table">
+<thead>
+<tr>
+<th>Segment</th>
+<th>Samples</th>
+<th>Subgroup MAPE</th>
+<th>Rel. Variance</th>
+<th>Avg Demand</th>
+<th>Policy ROP</th>
+<th>Policy EOQ</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+{rows_html}
+</tbody>
+</table>
+</div>"""
+            render_html(table_fairness)
+        else:
+            st.info("No subgroup data available for this dimension.")
+

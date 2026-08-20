@@ -51,11 +51,23 @@ class TestFullSystemFeatures(unittest.TestCase):
         self.assertIn("upper_bound", res)
         self.assertEqual(len(res["predicted_demand"]), 14)
         
-        # Test explain
+        # Test explain (plain English)
         explanation = model.explain_forecast(store_id="S001", product_id="P001")
         self.assertIsInstance(explanation, str)
         self.assertGreater(len(explanation), 10)
-        print(f"  [PASS] Forecast Model Inference: 14-day predictions & SHAP explanation generated.")
+
+        # Test explain (structured SHAP)
+        structured_shap = model.explain_forecast(store_id="S001", product_id="P001", return_structured=True, top_k=5)
+        self.assertIsInstance(structured_shap, list)
+        self.assertGreaterEqual(len(structured_shap), 1)
+        first_feat = structured_shap[0]
+        self.assertIn("feature", first_feat)
+        self.assertIn("impact", first_feat)
+        self.assertIn("signed_impact", first_feat)
+        self.assertIn("direction", first_feat)
+        self.assertIn(first_feat["direction"], ["positive", "negative"])
+        
+        print(f"  [PASS] Forecast Model Inference: 14-day predictions & structured SHAP values generated.")
 
     def test_03_inventory_optimization_math(self):
         """Test all optimization formulas against verified bounds."""

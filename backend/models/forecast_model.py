@@ -177,11 +177,25 @@ class ForecastModel:
         """Alias for predict_demand."""
         return self.predict_demand(*args, **kwargs)
 
-    def explain_forecast(self, df_features: Optional[pd.DataFrame] = None, 
-                         store_id: str = "S001", product_id: str = "P001") -> Any:
-        """Returns top SHAP contributing features in plain English."""
+    def explain_forecast(
+        self,
+        df_features: Optional[pd.DataFrame] = None, 
+        store_id: str = "S001",
+        product_id: str = "P001",
+        return_structured: bool = False,
+        top_k: int = 5
+    ) -> Any:
+        """
+        Returns top SHAP contributing features.
+        
+        If return_structured=True, returns a list of dictionaries with feature name,
+        mean absolute impact, signed mean impact, and direction.
+        If return_structured=False, returns a plain English string explanation.
+        """
         if not self.is_loaded:
             if not self.load():
+                if return_structured:
+                    return []
                 return "Recent 7-day sales velocity (+40%) and active promotion (+15%) are primary drivers."
                 
         if df_features is None:
@@ -196,17 +210,54 @@ class ForecastModel:
         try:
             explainer = shap.TreeExplainer(self.model)
             shap_values = explainer.shap_values(X)
-            mean_abs_shap = np.abs(shap_values).mean(axis=0)
-            top_indices = np.argsort(mean_abs_shap)[-3:][::-1]
             
-            explanations = []
+            # Mean signed impact (direction) and mean absolute impact (magnitude)
+            mean_signed_shap = shap_values.mean(axis=0)
+            mean_abs_shap = np.abs(shap_values).mean(axis=0)
+            top_indices = np.argsort(mean_abs_shap)[::-1][:top_k]
+            
+            structured_data = []
             for idx in top_indices:
                 feat_name = self.feature_cols[idx]
+                abs_val = round(float(mean_abs_shap[idx]), 2)
+                signed_val = round(float(mean_signed_shap[idx]), 2)
+                direction = "positive" if signed_val >= 0 else "negative"
+                structured_data.append({
+                    "feature": feat_name,
+                    "impact": abs_val,
+                    "signed_impact": signed_val,
+                    "direction": direction
+                })
+                
+            if return_structured:
+                return structured_data
+
+            explanations = []
+            for item in structured_data[:3]:
+                feat_name = item["feature"]
                 explanations.append(f"{feat_name} had a significant impact on the demand prediction.")
                 
             return " ".join(explanations)
         except Exception as e:
             logger.error(f"Error during SHAP explanation: {e}")
+            if return_structured:
+                return []
             return "Forecast is driven primarily by historical demand momentum and seasonal factors."
+
+    def explain_forecast_structured(
+        self,
+        df_features: Optional[pd.DataFrame] = None,
+        store_id: str = "S001",
+        product_id: str = "P001",
+        top_k: int = 5
+    ) -> List[Dict[str, Any]]:
+        """Structured SHAP feature explanation helper."""
+        return self.explain_forecast(
+            df_features=df_features,
+            store_id=store_id,
+            product_id=product_id,
+            return_structured=True,
+            top_k=top_k
+        )
 
 forecast_model = ForecastModel()

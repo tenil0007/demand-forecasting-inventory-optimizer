@@ -4,6 +4,7 @@ from typing_extensions import TypedDict
 from backend.models.forecast_model import ForecastModel
 from backend.config import OLLAMA_BASE_URL, OLLAMA_MODEL
 from backend.observability import traced_ollama_call
+from backend.security.prompt_guard import wrap_user_content, validate_entity_id, STORE_ID_RE, PRODUCT_ID_RE
 
 class AgentState(TypedDict):
     store_id: str
@@ -25,6 +26,10 @@ def forecast_node(state: AgentState) -> dict:
     store_id = state.get("store_id")
     product_id = state.get("product_id")
 
+    # Validate user-controlled IDs before they touch the model or LLM prompt
+    validate_entity_id(store_id, STORE_ID_RE, "store_id")
+    validate_entity_id(product_id, PRODUCT_ID_RE, "product_id")
+
     # Run the model
     model = ForecastModel()
     forecast_results = model.predict(store_id, product_id)
@@ -32,7 +37,13 @@ def forecast_node(state: AgentState) -> dict:
     # Try to get an explanation from Ollama
     explanation = ""
     try:
-        prompt = f"Explain this demand forecast for Store {store_id}, Product {product_id}:\n{json.dumps(forecast_results, indent=2)}\nKeep it brief and actionable."
+        sku_label = wrap_user_content(f"Store {store_id}, Product {product_id}")
+        prompt = (
+            f"Explain this demand forecast for the store and product identified below:\n"
+            f"{sku_label}\n"
+            f"Forecast data:\n{json.dumps(forecast_results, indent=2)}\n"
+            f"Keep it brief and actionable."
+        )
         
         response = traced_ollama_call(
             prompt=prompt,

@@ -94,17 +94,32 @@ Evaluating the AI Agent policy against a standard Naive replenishment policy (st
 
 ---
 
+## ⚖️ Responsible AI — Fairness & Subgroup Auditing
+
+To prevent algorithmic bias and disparate inventory availability, the platform runs an automated subgroup fairness audit across geographic, product, and store segments on held-out test data:
+
+- **Audited Dimensions:** Geographic Region (`Central`, `East`, `North`, `South`, `West`), Product Category (`Apparel`, `Electronics`, `Groceries`, `Health & Beauty`, `Home & Kitchen`), and Store Location (`S001`–`S005`).
+- **Fairness Criterion:** Evaluates forecast accuracy (MAPE, RMSE, MAE) and replenishment policy parity (Average ROP, EOQ, Safety Stock). Any subgroup experiencing relative MAPE degradation $> 25\%$ compared to the overall baseline is flagged as `Requires Review`.
+- **Current Limitations:** Dataset scale (~9,000 records across 50 store-SKU pairs); uses relative MAPE degradation as an operational fairness proxy rather than protected demographic attributes, since retail store SKUs represent commercial inventory entities.
+
+```bash
+# Run fairness & subgroup audit
+python backend/models/fairness_audit.py
+```
+
+---
+
 ## 🛠️ Tech Stack & Dashboard Tabs
 
 - **Backend:** FastAPI, LangGraph (with `MemorySaver` checkpointer & `interrupt()`), SQLite, SQLAlchemy
 - **ML / Analytics:** XGBoost Regressor, Prophet, SHAP TreeExplainer, Scikit-learn
 - **Frontend Dashboard (Streamlit 6-Tab Interface):**
-  1. `📊 Overview`: High-level operational KPIs, stockout risk distribution, catalog summaries.
-  2. `🔮 Forecast Explorer`: Multi-horizon demand forecasts with 95% confidence bands and SHAP drivers.
-  3. `📦 Reorder Recommendations`: Replenishment queue with EOQ calculations and Human-in-the-Loop review buttons.
-  4. `💬 Agent Chat`: Autonomous assistant supporting multi-step natural language queries.
-  5. `📋 Audit Log`: Immutable record of all automated recommendations and manager sign-offs.
-  6. `📡 Live Monitoring`: Real-time control tower stepping through days, simulating inventory depletion, and triggering instant toast alerts on high-risk stockout crossings.
+  1. `📊 Network Pulse`: High-level operational KPIs, stockout risk distribution, catalog summaries.
+  2. `🔮 Forecast Explorer`: Multi-horizon demand forecasts with 95% confidence bands and real dynamic SHAP drivers.
+  3. `📦 Replenishment`: Replenishment queue with EOQ calculations and Human-in-the-Loop review buttons.
+  4. `💬 Agent Chat`: Autonomous assistant supporting multi-step natural language queries and LangGraph traces.
+  5. `🛡️ Audit Trail`: Immutable record of all automated recommendations and manager sign-offs.
+  6. `⚖️ Fairness & Bias`: Interactive subgroup performance audit across Regions, Categories, and Stores.
 
 ---
 
@@ -120,12 +135,16 @@ python backend/models/train.py
 # 3. Run backtest simulation
 python backend/models/backtest.py
 
-# 4. Run automated test suite
+# 4. Run subgroup fairness audit
+python backend/models/fairness_audit.py
+
+# 5. Run automated test suite
 python -m pytest tests/ -v
 
-# 5. Start FastAPI backend (Port 8000)
+# 6. Start FastAPI backend (Port 8000)
 uvicorn backend.main:app --port 8000
 
-# 6. Launch Streamlit UI
+# 7. Launch Streamlit UI
 streamlit run frontend/app.py
 ```
+
