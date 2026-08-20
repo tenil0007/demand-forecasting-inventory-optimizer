@@ -644,19 +644,34 @@ def fetch_metrics():
         try:
             with open(metrics_path, 'r') as f:
                 data = json.load(f)
-                mape_val = data.get('MAPE', data.get('mape', 0.186))
+                mape_val = data.get('MAPE', data.get('mape', 0.3658))
                 if isinstance(mape_val, float) and mape_val < 1.0:
                     mape_val = round(mape_val * 100, 1)
                 elif isinstance(mape_val, float):
                     mape_val = round(mape_val, 1)
+
+                agg_mape = data.get('xgboost_daily_aggregate_MAPE', data.get('xgboost', {}).get('daily_aggregate', {}).get('MAPE', 0.0574))
+                if isinstance(agg_mape, float) and agg_mape < 1.0:
+                    agg_mape = round(agg_mape * 100, 1)
+                elif isinstance(agg_mape, float):
+                    agg_mape = round(agg_mape, 1)
+
+                prophet_mape = data.get('prophet_daily_aggregate_MAPE', data.get('prophet', {}).get('daily_aggregate', {}).get('MAPE', 0.2096))
+                if isinstance(prophet_mape, float) and prophet_mape < 1.0:
+                    prophet_mape = round(prophet_mape * 100, 1)
+                elif isinstance(prophet_mape, float):
+                    prophet_mape = round(prophet_mape, 1)
+
                 return {
                     "mape": mape_val,
-                    "rmse": round(float(data.get('RMSE', data.get('rmse', 6.71))), 2),
-                    "mae": round(float(data.get('MAE', data.get('mae', 5.10))), 2)
+                    "mape_aggregate": agg_mape,
+                    "prophet_mape": prophet_mape,
+                    "rmse": round(float(data.get('RMSE', data.get('rmse', 32.69))), 2),
+                    "mae": round(float(data.get('MAE', data.get('mae', 24.67))), 2)
                 }
         except Exception:
             pass
-    return {"mape": 18.6, "rmse": 6.71, "mae": 5.10}
+    return {"mape": 36.6, "mape_aggregate": 5.7, "prophet_mape": 21.0, "rmse": 32.69, "mae": 24.67}
 
 @st.cache_data(ttl=300)
 def fetch_fairness_audit():
@@ -969,7 +984,8 @@ if active_tab == nav_options[0]:
                 ))
                 fig_pie.update_layout(
                     margin=dict(l=5, r=5, t=5, b=5), height=230,
-                    showlegend=False, paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)'
+                    showlegend=False, paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+                    dragmode=False, hovermode='closest'
                 )
                 st.plotly_chart(fig_pie, use_container_width=True, config={'displayModeBar': False})
 
@@ -991,10 +1007,14 @@ if active_tab == nav_options[0]:
                 fig_bar.update_layout(
                     margin=dict(l=10, r=20, t=5, b=5), height=260,
                     template='plotly_white', paper_bgcolor='rgba(0,0,0,0)',
-                    xaxis=dict(showgrid=True, gridcolor='#F1F5F9', title="", zeroline=False),
-                    yaxis=dict(title="", tickfont=dict(size=12, color='#0F172A'))
+                    dragmode=False,
+                    xaxis=dict(showgrid=True, gridcolor='#F1F5F9', title="", zeroline=False, fixedrange=True),
+                    yaxis=dict(title="", tickfont=dict(size=12, color='#0F172A'), fixedrange=True)
                 )
-                fig_bar.update_traces(marker=dict(cornerradius=4))
+                fig_bar.update_traces(
+                    marker=dict(cornerradius=4),
+                    hovertemplate='<b>%{y}</b><br>Total Historical Demand: <b>%{x:,.0f} units</b><extra></extra>'
+                )
                 st.plotly_chart(fig_bar, use_container_width=True, config={'displayModeBar': False})
 
         # ── Forecasting Model Benchmark ───────────────────────────────────
@@ -1004,13 +1024,13 @@ if active_tab == nav_options[0]:
             <div class="benchmark-grid">
                 <div class="benchmark-card benchmark-card-primary">
                     <div class="benchmark-label benchmark-label-primary">Production Model</div>
-                    <div class="benchmark-model-name">XGBoost Ensemble (Trained on Kaggle Dataset)</div>
-                    <div class="benchmark-value benchmark-value-primary">{metrics["mape"]}% <span class="benchmark-unit">MAPE</span></div>
+                    <div class="benchmark-model-name">XGBoost Ensemble (76k Assigned Dataset)</div>
+                    <div class="benchmark-value benchmark-value-primary">{metrics.get("mape_aggregate", 5.7)}% <span class="benchmark-unit">Daily Network MAPE (36.6% SKU-level)</span></div>
                 </div>
                 <div class="benchmark-card benchmark-card-default">
                     <div class="benchmark-label benchmark-label-muted">Baseline Model</div>
-                    <div class="benchmark-model-name">Prophet / Naive Moving Average</div>
-                    <div class="benchmark-value benchmark-value-muted">27.3% <span class="benchmark-unit">MAPE</span></div>
+                    <div class="benchmark-model-name">Prophet (Additive Seasonality/Trend)</div>
+                    <div class="benchmark-value benchmark-value-muted">{metrics.get("prophet_mape", 21.0)}% <span class="benchmark-unit">Daily Network MAPE</span></div>
                 </div>
             </div>
             ''')
@@ -1093,20 +1113,41 @@ elif active_tab == nav_options[1]:
                         line=dict(color='rgba(255,255,255,0)'), name='95% CI'
                     ))
                     fig_fc.update_layout(
-                        margin=dict(l=10, r=10, t=10, b=10), height=320,
+                        margin=dict(l=15, r=15, t=15, b=15), height=320,
                         template='plotly_white', paper_bgcolor='rgba(0,0,0,0)',
                         hovermode="x unified",
+                        dragmode='pan',
                         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-                        xaxis=dict(showgrid=True, gridcolor='#F1F5F9'),
-                        yaxis=dict(showgrid=True, gridcolor='#F1F5F9', title="")
+                        xaxis=dict(
+                            showgrid=True,
+                            gridcolor='#F1F5F9',
+                            tickformat='%b %d',
+                            hoverformat='%b %d, %Y',
+                            fixedrange=False
+                        ),
+                        yaxis=dict(
+                            showgrid=True,
+                            gridcolor='#F1F5F9',
+                            title="Units / Day",
+                            fixedrange=True
+                        )
                     )
-                    st.plotly_chart(fig_fc, use_container_width=True, config={'displayModeBar': False})
+                    st.plotly_chart(
+                        fig_fc,
+                        use_container_width=True,
+                        config={
+                            'displayModeBar': True,
+                            'modeBarButtonsToRemove': ['lasso2d', 'select2d', 'autoScale2d'],
+                            'displaylogo': False,
+                            'scrollZoom': True
+                        }
+                    )
 
                     render_html(f'''
                     <div class="info-box">
                         <div class="info-box-icon">{ICON_INFO}</div>
                         <div class="info-box-text">
-                            <strong>Model Precision: {metrics["mape"]}% MAPE on Kaggle Dataset.</strong> Forecast for {prod_sel} is calibrated within ±{metrics["mae"]} units/day under 95% service-level assurance.
+                            <strong>Model Precision: {metrics["mape"]}% SKU-Level MAPE ({metrics.get("mape_aggregate", 5.7)}% Network Aggregate).</strong> Forecast for {prod_sel} is calibrated within ±{metrics["mae"]} units/day under 95% service-level assurance.
                         </div>
                     </div>
                     ''')
@@ -1169,17 +1210,57 @@ elif active_tab == nav_options[1]:
                     ]
                     shap_colors = ['#10B981' if v >= 0 else '#EF4444' for v in shap_impacts]
 
+                    # Safe symmetric range bound with generous margin for labels
+                    max_impact = max([abs(v) for v in shap_impacts]) if shap_impacts else 10.0
+                    x_range_bound = max(max_impact * 1.55, 6.0)
+                    text_labels = [f" {v:+.2f} units" if v >= 0 else f"{v:+.2f} units " for v in shap_impacts]
+
                     fig_shap = go.Figure(go.Bar(
-                        x=shap_impacts, y=shap_names, orientation='h',
-                        marker_color=shap_colors,
-                        text=[f"{'+' if v >= 0 else ''}{v:.2f}" for v in shap_impacts],
-                        textposition='outside'
+                        x=shap_impacts,
+                        y=shap_names,
+                        orientation='h',
+                        marker=dict(
+                            color=shap_colors,
+                            cornerradius=4
+                        ),
+                        text=text_labels,
+                        textposition='outside',
+                        cliponaxis=False,
+                        hovertemplate='<b>%{y}</b><br>Demand Impact: <b>%{x:+.2f} units/day</b><extra></extra>'
                     ))
                     fig_shap.update_layout(
-                        margin=dict(l=10, r=35, t=10, b=10), height=340,
-                        template='plotly_white', paper_bgcolor='rgba(0,0,0,0)',
-                        xaxis=dict(showgrid=True, gridcolor='#F1F5F9', title="", zeroline=True, zerolinecolor='#CBD5E1'),
-                        yaxis=dict(autorange="reversed")
+                        margin=dict(l=150, r=75, t=32, b=20),
+                        height=340,
+                        template='plotly_white',
+                        paper_bgcolor='rgba(0,0,0,0)',
+                        dragmode=False,
+                        xaxis=dict(
+                            showgrid=True,
+                            gridcolor='#F1F5F9',
+                            zeroline=True,
+                            zerolinecolor='#94A3B8',
+                            zerolinewidth=1.5,
+                            range=[-x_range_bound, x_range_bound],
+                            fixedrange=True,
+                            title=dict(text="Impact on Daily Forecast (Units)", font=dict(size=11, color="#64748B"))
+                        ),
+                        yaxis=dict(
+                            autorange="reversed",
+                            fixedrange=True,
+                            tickfont=dict(size=12, color="#0F172A")
+                        ),
+                        annotations=[
+                            dict(
+                                x=-x_range_bound * 0.65, y=1.14, xref="x", yref="paper",
+                                text="◀ Decreases Demand", showarrow=False,
+                                font=dict(size=10.5, color="#EF4444")
+                            ),
+                            dict(
+                                x=x_range_bound * 0.65, y=1.14, xref="x", yref="paper",
+                                text="Increases Demand ▶", showarrow=False,
+                                font=dict(size=10.5, color="#10B981")
+                            )
+                        ]
                     )
                     st.plotly_chart(fig_shap, use_container_width=True, config={'displayModeBar': False})
                 else:
