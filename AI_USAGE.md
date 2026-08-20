@@ -26,3 +26,15 @@ This document tracks all AI tool usage during development of this project.
 - Trained Facebook Prophet additive baseline against XGBoost, logging comparison into `artifacts/model_metrics.json`.
 - Built the 6th Streamlit tab (`📡 Live Monitoring`) with single-day step-forward simulation and real-time toast alerts for high-risk stockout SKU transitions.
 - Added comprehensive unit tests in `tests/test_agent_interrupt.py` and verified all 13 tests passing.
+
+## 2026-08-20 — Real Dataset Migration, Model Retraining, and Fair Evaluation Benchmark
+**Prompt:** "Swap synthetic data for real 76,000-row dataset (`sales_data.csv` -> `retail_store_inventory.csv`), fix `PRODUCT_ID_RE` regex for 4-digit IDs, compute daily aggregate MAPE for fair apples-to-apples Prophet vs XGBoost comparison, retrain XGBoost, rerun backtest & fairness audit, and update documentation."
+**Tool:** Google Antigravity (Gemini 3.7 Flash)
+**What I kept / changed:**
+- Replaced synthetic dataset with official 76,000-row dataset covering 5 stores (`S001`–`S005`), 20 SKUs (`P0001`–`P0020`), 5 categories (`Clothing`, `Electronics`, `Furniture`, `Groceries`, `Toys`), and 4 regions (`East`, `North`, `South`, `West`).
+- Fixed `PRODUCT_ID_RE` in `backend/security/prompt_guard.py` from `r"^P\d{3}$"` to `r"^P\d{3,4}$"` to accept 4-digit SKU IDs (`P0001`–`P0020`).
+- Resolved methodology asymmetry in `backend/models/train.py`: added daily aggregate demand evaluation for XGBoost so it compares fairly against Prophet at identical aggregation levels (XGBoost 5.74% MAPE vs Prophet 20.96% MAPE), while preserving per-row metrics (XGBoost 36.58% MAPE).
+- Retrained model end-to-end and updated `artifacts/model_metrics.json`.
+- Reran backtest simulation: achieved 95.23% total cost reduction ($7.79M down to $371.4k), 99.85% fill rate (up from 82.25%), and 99.19% lost-sales reduction ($7.52M down to $61.1k).
+- Reran fairness audit: audited 14 subgroups; identified `Toys` category (+34.7% relative degradation) as requiring operational review.
+- Fixed hardcoded region assertion in `tests/test_fairness_audit.py` to dynamic dataset unique counts and confirmed 100% test pass rate across all 35 tests.

@@ -101,6 +101,7 @@ class TestValidateEntityId:
 
     def test_valid_product_id(self):
         assert validate_entity_id("P001", PRODUCT_ID_RE, "product_id") == "P001"
+        assert validate_entity_id("P0001", PRODUCT_ID_RE, "product_id") == "P0001"
 
     def test_invalid_store_id_sql_injection(self):
         """SQL-injection payload raises ValueError; the error message must NOT

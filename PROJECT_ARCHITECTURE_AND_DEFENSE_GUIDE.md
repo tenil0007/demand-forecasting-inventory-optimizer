@@ -10,12 +10,12 @@
 - **Situation (S)**: Traditional retail supply chains suffer from disjointed forecasting and manual replenishment workflows. Disconnected spreadsheets and static reorder rules cause frequent stockouts during promotional surges and costly overstocking during demand slumps, eroding profit margins and reducing customer service levels.
 - **Task (T)**: Architect and build an enterprise-grade, end-to-end autonomous demand forecasting and inventory optimization platform (**NexusSupply**) that ingests multi-store retail data, accurately predicts demand across variable horizons, optimizes inventory replenishment parameters, and automates reorder workflows using Agentic AI with strict Human-in-the-Loop (HITL) governance.
 - **Action (A)**:
-  1. Engineered a multi-stage time-series ML pipeline using an **XGBoost Ensemble** trained on ~9,000 Kaggle retail store records with 14 engineered lag and rolling-window features.
+  1. Engineered a multi-stage time-series ML pipeline using an **XGBoost Ensemble** trained on the official **76,000-row retail store dataset** with 24 engineered lag, rolling-window, competitor price, and weather features.
   2. Implemented classical Operations Research models for dynamic **Safety Stock (SS)**, **Reorder Point (ROP)**, and **Economic Order Quantity (EOQ)** calibrated for a 95% service level ($Z = 1.65$).
   3. Developed an **Agentic AI Workflow (LangGraph / Ollama Llama 3.1)** that reasons over inventory alerts, plans replenishment actions, and surfaces transparent multi-step reasoning traces.
-  4. Embedded **Responsible AI guardrails** with SHAP explainability, 95% confidence intervals, and an immutable SQLite audit trail requiring human approvals for high-value orders.
+  4. Embedded **Responsible AI guardrails** with SHAP explainability, 95% confidence intervals, subgroup fairness audits, and an immutable SQLite audit trail requiring human approvals for high-value orders.
   5. Built an enterprise-grade web application with a modern shadcn-inspired **NexusSupply** design system.
-- **Result (R)**: Reduced demand forecast error to **18.6% MAPE** (a 31.8% improvement over the Prophet baseline of 27.3%), maintained a **94.8% Network Service Level**, automated over **90% of routine reorder decisions**, and created an immutable audit record for compliance.
+- **Result (R)**: Achieved a **5.74% MAPE** on aggregate daily demand (beating the Prophet baseline of 20.96% MAPE by 72.6%), reduced total inventory operational cost by **95.23%** in held-out backtesting ($7.79M down to $371.4k), achieved a **99.85% Fill Rate** (up from 82.25%), slashed lost sales from stockouts by **99.19%**, and created an immutable audit record for compliance.
 
 ---
 
@@ -24,16 +24,16 @@
 ```
 +-----------------------------------------------------------------------------------+
 |                           1. DATA INGESTION & STORAGE                             |
-|  - Kaggle Retail Dataset (~9,000 Records, 5 Stores, 10 SKUs, 5 Categories)         |
-|  - Feature Store: Lags (1,7,14,28), Rolling Means (7d,14d), Weather, Promo Flags |
+|  - Official Dataset (76,000 Records, 5 Stores, 20 SKUs, 5 Categories, 4 Regions)  |
+|  - Feature Store: Lags (1,7,14,28), Rolling Means (7d,28d), Weather, Promo Flags |
 |  - SQLite Audit DB: Immutable Human-in-the-Loop Decision Logs                     |
 +-----------------------------------------------------------------------------------+
                                          |
                                          v
 +-----------------------------------------------------------------------------------+
 |                     2. MACHINE LEARNING FORECASTING ENGINE                        |
-|  - Production Model: XGBoost Regressor (18.6% MAPE, RMSE: 6.71, MAE: 5.10)        |
-|  - Baseline Comparison: Facebook Prophet (27.3% MAPE), Naive MA (34.1% MAPE)      |
+|  - Production Model: XGBoost Regressor (5.74% Daily Agg MAPE / 36.58% Row MAPE)   |
+|  - Baseline Comparison: Facebook Prophet (20.96% Daily Agg MAPE)                  |
 |  - SHAP Explainability Engine: Feature Attribution & Driver Analysis               |
 +-----------------------------------------------------------------------------------+
                                          |
@@ -71,25 +71,25 @@
 ## 3. Detailed Technical Components
 
 ### Component 1: Data Pipeline & Feature Engineering
-- **Dataset**: Kaggle Retail Store Inventory Dataset (`data/raw/retail_store_inventory.csv`).
-  - **Scope**: 5 retail stores (`S001`–`S005`), 10 core SKUs (`P001`–`P010`), 5 product categories (`Groceries`, `Electronics`, `Health & Beauty`, `Home & Kitchen`, `Apparel`), spanning multi-season daily transactions.
+- **Dataset**: Official Retail Store Inventory Dataset (`data/raw/retail_store_inventory.csv`).
+  - **Scope**: 76,000 rows spanning 2022-01-01 to 2024-01-30 across 5 retail stores (`S001`–`S005`), 20 SKUs (`P0001`–`P0020`), 5 product categories (`Clothing`, `Electronics`, `Furniture`, `Groceries`, `Toys`), and 4 geographic regions (`East`, `North`, `South`, `West`).
 - **Engineered Features**:
-  1. *Temporal Features*: Day of week, month, seasonality index, weekend flag.
-  2. *Autoregressive Lags*: $Lag_1, Lag_7, Lag_{14}, Lag_{28}$ (capturing weekly cyclicality).
-  3. *Rolling Window Statistics*: 7-day and 14-day rolling mean and standard deviation ($\sigma_d$).
-  4. *Exogenous Drivers*: Promotional discounts, competitor price gaps ($P_{store} - P_{comp}$), weather conditions (Rainy, Sunny, Snowy), holiday surges.
+  1. *Temporal Features*: Day of week, month, quarter, seasonality index, weekend flag.
+  2. *Autoregressive Lags*: $Lag_1, Lag_7, Lag_{14}, Lag_{28}$ (capturing weekly and monthly cyclicality).
+  3. *Rolling Window Statistics*: 7-day and 28-day rolling mean and standard deviation ($\sigma_d$).
+  4. *Exogenous Drivers*: Promotional discounts, price/competitor ratios, weather conditions (Sunny, Rainy, Snowy, Cloudy, Stormy), epidemic flag.
 
 ### Component 2: Machine Learning Forecasting Pipeline
 - **Production Architecture**: **XGBoost (Extreme Gradient Boosting) Regressor**.
   - **Objective**: Squared error with tree-based gradient boosting.
-  - **Hyperparameters**: `n_estimators=300`, `max_depth=6`, `learning_rate=0.03`, `subsample=0.8`, `colsample_bytree=0.8`.
-  - **Cross-Validation**: Expanding-window time-series split (preventing lookahead bias).
+  - **Hyperparameters**: `n_estimators=100`, `max_depth=6`, `learning_rate=0.1`, `random_state=42`.
+  - **Cross-Validation**: Time-based held-out split (last 30 days held out).
 - **Benchmark Comparison**:
-  | Model | MAPE (%) | RMSE | MAE | Inference Speed |
-  | :--- | :---: | :---: | :---: | :---: |
-  | **XGBoost Ensemble (Production)** | **18.6%** | **6.71** | **5.10** | **~12ms** |
-  | Prophet (Baseline) | 27.3% | 9.84 | 7.92 | ~350ms |
-  | Moving Average (Naive) | 34.1% | 12.40 | 10.15 | <1ms |
+  | Model | Evaluation Granularity | MAPE (%) | RMSE | MAE |
+  | :--- | :--- | :---: | :---: | :---: |
+  | **XGBoost (Production)** | **Daily Aggregate (Network)** | **5.74%** | **606.50** | **520.70** |
+  | Prophet (Baseline) | Daily Aggregate (Network) | 20.96% | 2,153.79 | 1,883.31 |
+  | **XGBoost (Production)** | **Per-Row (Store-SKU-Day)** | **36.58%** | **32.69** | **24.67** |
 
 ### Component 3: Operations Research & Inventory Optimization
 Instead of relying solely on raw forecasts, predictions feed directly into mathematical inventory policies:
@@ -134,7 +134,7 @@ Instead of relying solely on raw forecasts, predictions feed directly into mathe
 ### Decision 1: XGBoost vs. Deep Learning (LSTM / DeepAR)
 - **Point (P)**: We selected XGBoost Regressor over Recurrent Neural Networks (LSTM/Transformers).
 - **Reason (R)**: Tabular retail demand data with mixed numerical and categorical exogenous features (promos, weather, prices) trains faster and avoids overfitting on moderate-sized datasets.
-- **Evidence (E)**: XGBoost achieved 18.6% MAPE with ~12ms inference latency compared to LSTM's 21.4% MAPE and heavy compute overhead.
+- **Evidence (E)**: XGBoost achieved 5.74% aggregate MAPE (and 36.58% SKU-level MAPE) with ~12ms inference latency compared to LSTM's computational overhead and vulnerability to small-batch noise.
 - **Point (P)**: For retail operations, sub-second inference enables real-time SKU reordering at low computational cost.
 
 ### Decision 2: Streamlit vs. React/FastAPI Separate Microservices
@@ -163,7 +163,7 @@ Instead of relying solely on raw forecasts, predictions feed directly into mathe
 ## 6. Project Ownership & Defense Q&A Preparation
 
 ### Q1: "What was your specific role and technical contribution?"
-> **Answer**: *"I designed and implemented the entire end-to-end architecture: from engineering the time-series lag features on the Kaggle dataset, training the 18.6% MAPE XGBoost model, formulating the dynamic Operations Research inventory policies (SS, ROP, EOQ), to developing the LangGraph agent reasoning state machine and building the 5-tab executive dashboard with custom CSS design tokens."*
+> **Answer**: *"I designed and implemented the entire end-to-end architecture: from engineering the time-series lag features on the 76,000-row retail dataset, training the 5.74% aggregate MAPE XGBoost model, formulating the dynamic Operations Research inventory policies (SS, ROP, EOQ), to developing the LangGraph agent reasoning state machine and building the 6-tab executive dashboard with custom CSS design tokens."*
 
 ### Q2: "How is this project different from a standard forecasting model?"
 > **Answer**: *"Most projects stop at predicting a number. NexusSupply is an actionable decision system. It translates predictions into optimal operational decisions (EOQ order batches and ROP triggers), flags risk categories, provides SHAP explainability, and enforces Human-in-the-Loop governance with an immutable audit trail."*

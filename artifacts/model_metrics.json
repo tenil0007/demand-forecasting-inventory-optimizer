@@ -1,18 +1,39 @@
 {
     "xgboost": {
-        "MAPE": 0.1839011809593587,
-        "RMSE": 6.628611358089081,
-        "MAE": 5.042595906411448,
+        "per_row": {
+            "MAPE": 0.3658002452371635,
+            "RMSE": 32.68812599597497,
+            "MAE": 24.671788644175376,
+            "granularity": "SKU-store-day (Row level)"
+        },
+        "daily_aggregate": {
+            "MAPE": 0.057417541099021405,
+            "RMSE": 606.5043386781737,
+            "MAE": 520.698226436492,
+            "granularity": "Daily total aggregate across all SKUs/Stores"
+        },
+        "MAPE": 0.3658002452371635,
+        "RMSE": 32.68812599597497,
+        "MAE": 24.671788644175376,
+        "aggregate_MAPE": 0.057417541099021405,
         "target": "Demand (Unconstrained)",
-        "features_count": 25
+        "features_count": 24
     },
     "prophet": {
-        "MAPE": 0.2819182902461931,
-        "RMSE": 422.45996723490236,
-        "MAE": 398.9120961714855,
+        "daily_aggregate": {
+            "MAPE": 0.20962362566306422,
+            "RMSE": 2153.7888381952985,
+            "MAE": 1883.3141322926208,
+            "granularity": "Daily total aggregate across all SKUs/Stores"
+        },
+        "MAPE": 0.20962362566306422,
+        "RMSE": 2153.7888381952985,
+        "MAE": 1883.3141322926208,
         "model_type": "Prophet (Additive Seasonality/Trend)"
     },
-    "MAPE": 0.1839011809593587,
-    "RMSE": 6.628611358089081,
-    "MAE": 5.042595906411448
+    "MAPE": 0.3658002452371635,
+    "RMSE": 32.68812599597497,
+    "MAE": 24.671788644175376,
+    "xgboost_daily_aggregate_MAPE": 0.057417541099021405,
+    "prophet_daily_aggregate_MAPE": 0.20962362566306422
 }

@@ -126,9 +126,10 @@ def test_run_fairness_audit_real_data_execution():
     assert "by_category" in subgroups
     assert "by_store" in subgroups
     
-    assert len(subgroups["by_region"]) == 5
-    assert len(subgroups["by_category"]) == 5
-    assert len(subgroups["by_store"]) == 5
+    raw_df = pd.read_csv(RAW_DATA_PATH)
+    assert len(subgroups["by_region"]) == raw_df["Region"].nunique()
+    assert len(subgroups["by_category"]) == raw_df["Category"].nunique()
+    assert len(subgroups["by_store"]) == raw_df["Store ID"].nunique()
     
     # Check that each subgroup includes optimization parameters (ROP, EOQ, SS)
     for seg in subgroups["by_region"]:

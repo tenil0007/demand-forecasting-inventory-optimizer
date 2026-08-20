@@ -42,25 +42,25 @@ User Query / Scheduled Trigger
 
 ## 📊 Dataset & Feature Engineering
 
-Based on the [Retail Store Inventory and Demand Forecasting](https://www.kaggle.com/datasets/atomicd/retail-store-inventory-and-demand-forecasting) schema with 16 core columns:
+Based on the official retail store dataset (`data/raw/retail_store_inventory.csv`) comprising **76,000 transaction records** across 5 retail stores (`S001`–`S005`), 20 SKUs (`P0001`–`P0020`), 5 categories (`Clothing`, `Electronics`, `Furniture`, `Groceries`, `Toys`), and 4 geographic regions (`East`, `North`, `South`, `West`) spanning 2022 to 2024 with 16 core columns:
 
 | Column | Type | Role |
 |---|---|---|
-| `Date` | Datetime | Temporal index |
-| `Store ID` | String | Retail store entity |
-| `Product ID` | String | SKU catalog item |
-| `Category` | Categorical | Product category (Groceries, Beverages, etc.) |
-| `Region` | Categorical | Geographic market |
+| `Date` | Datetime | Temporal index (2022-01-01 to 2024-01-30) |
+| `Store ID` | String | Retail store entity (`S001`–`S005`) |
+| `Product ID` | String | SKU catalog item (`P0001`–`P0020`) |
+| `Category` | Categorical | Product category (`Clothing`, `Electronics`, `Furniture`, `Groceries`, `Toys`) |
+| `Region` | Categorical | Geographic market (`East`, `North`, `South`, `West`) |
 | `Inventory Level` | Numeric | On-hand available stock |
 | `Units Sold` | Numeric | Historical sales volume (*censored demand signal*) |
 | `Units Ordered` | Numeric | Incoming supplier replenishment |
 | `Price` | Numeric | Store retail selling price |
 | `Discount` | Numeric | Applied promotional discount percentage |
-| `Weather Condition` | Categorical | Weather factor (Sunny, Rainy, Stormy, etc.) |
-| `Promotion` | Binary Flag | Active marketing campaign |
+| `Weather Condition` | Categorical | Weather factor (Sunny, Rainy, Snowy, Cloudy, Stormy) |
+| `Promotion` | Binary Flag | Active marketing campaign (0/1) |
 | `Competitor Pricing` | Numeric | Market competitor benchmark price |
 | `Seasonality` | Categorical | Seasonal period (Winter, Spring, Summer, Fall) |
-| `Epidemic` | Binary Flag | Surge anomaly indicator |
+| `Epidemic` | Binary Flag | Surge anomaly indicator (0/1) |
 | **`Demand`** | Numeric | **Model Prediction Target (True Unconstrained Demand)** |
 
 ### Target Selection Rationale (`Demand` vs `Units Sold`):
@@ -70,27 +70,30 @@ In retail supply chains, `Units Sold` represents **censored demand**—during st
 
 ## 🔬 Model Benchmark Comparison
 
-To rigorously validate model selection, we benchmarked our tabular XGBoost model against a classical additive time series model (Facebook Prophet):
+To rigorously validate model selection, we benchmarked our tabular XGBoost model against Facebook Prophet across both fine-grained row-level demand and daily aggregated total network demand:
 
-| Model | Target | Features / Regressors | MAPE | RMSE | MAE | Inference Speed |
+| Model | Evaluation Granularity | Target | Features / Regressors | MAPE | RMSE | MAE |
 |---|---|---|---|---|---|---|
-| **XGBoost (Selected)** | Unconstrained `Demand` | 25 tabular features (lags, rolling stats, price ratio, weather OHE) | **18.6%** | **6.71 units** | **5.10 units** | **< 5ms** |
-| **Prophet (Baseline)** | Aggregate Daily `Demand` | Additive Trend + Weekly/Yearly Fourier Seasonality | 27.3% | 409.27 (agg) | 386.90 (agg) | ~250ms |
+| **XGBoost (Production)** | **Daily Aggregate (Network)** | Aggregate Daily `Demand` | 24 tabular features aggregated to daily sum | **5.74%** | **606.50** | **520.70** |
+| **Prophet (Baseline)** | **Daily Aggregate (Network)** | Aggregate Daily `Demand` | Additive Trend + Weekly/Yearly Fourier Seasonality | 20.96% | 2,153.79 | 1,883.31 |
+| **XGBoost (Production)** | **Per-Row (Store-SKU-Day)** | SKU-Store `Demand` | 24 tabular features (lags, rolling stats, price ratio, weather OHE) | **36.58%** | **32.69** | **24.67** |
 
-*XGBoost outperforms Prophet because it natively captures complex cross-feature interactions (e.g. competitor price ratio, promotional discounts, and localized weather shocks).*
+*Methodology Note: When compared apples-to-apples at identical daily aggregate granularity, XGBoost achieves a **5.74% MAPE**, outperforming Prophet's **20.96% MAPE** by **72.6% relative error reduction** because XGBoost captures non-linear interactions across competitor pricing, promotions, and localized weather.*
 
 ---
 
 ## 📈 Backtest Financial & Operational Impact
 
-Evaluating the AI Agent policy against a standard Naive replenishment policy (static ROP / fixed reorder quantity) across 50 store-SKU combinations over a 60-day test window:
+Evaluating the AI Agent policy against a standard Naive replenishment policy (static ROP / fixed reorder quantity) across all 100 store-SKU combinations over a 60-day held-out test window (2023-12-01 to 2024-01-30):
 
 | Metric | Naive Policy | AI Agent Policy | Improvement |
 |---|---|---|---|
-| **Total Inventory Cost** | $104,343.38 | **$103,166.14** | **+$1,177.24 (1.1% Net Savings)** |
-| **Ordering Cost** | $45,050.00 | **$17,650.00** | **-60.8% fewer purchase orders** |
-| **Lost Sales from Stockouts** | $48,275.90 | **$45,452.72** | **-$2,823.18 in saved revenue** |
-| **Service Fill Rate** | 99.2% | **99.3%** | **Optimal service level achieved** |
+| **Total Inventory Cost** | $7,789,113.23 | **$371,406.55** | **+$7,417,706.67 (95.23% Cost Savings)** |
+| **Lost Sales from Stockouts** | $7,519,038.87 | **$61,098.56** | **-$7,457,940.31 (99.19% Lost-Sales Reduction)** |
+| **Ordering Cost** | $245,450.00 | **$63,500.00** | **-74.1% reduction in PO overhead** |
+| **Holding Cost** | $24,624.36 | $246,807.99 | Optimal safety stock investment |
+| **Stockout Units** | 110,174 units | **913 units** | **-99.17% fewer stockout units** |
+| **Service Fill Rate** | 82.25% | **99.85%** | **+17.61% Fill Rate Improvement** |
 
 ---
 
@@ -98,9 +101,11 @@ Evaluating the AI Agent policy against a standard Naive replenishment policy (st
 
 To prevent algorithmic bias and disparate inventory availability, the platform runs an automated subgroup fairness audit across geographic, product, and store segments on held-out test data:
 
-- **Audited Dimensions:** Geographic Region (`Central`, `East`, `North`, `South`, `West`), Product Category (`Apparel`, `Electronics`, `Groceries`, `Health & Beauty`, `Home & Kitchen`), and Store Location (`S001`–`S005`).
-- **Fairness Criterion:** Evaluates forecast accuracy (MAPE, RMSE, MAE) and replenishment policy parity (Average ROP, EOQ, Safety Stock). Any subgroup experiencing relative MAPE degradation $> 25\%$ compared to the overall baseline is flagged as `Requires Review`.
-- **Current Limitations:** Dataset scale (~9,000 records across 50 store-SKU pairs); uses relative MAPE degradation as an operational fairness proxy rather than protected demographic attributes, since retail store SKUs represent commercial inventory entities.
+- **Audited Dimensions:** Geographic Region (`East`, `North`, `South`, `West`), Product Category (`Clothing`, `Electronics`, `Furniture`, `Groceries`, `Toys`), and Store Location (`S001`–`S005`) — 14 subgroups total.
+- **Fairness Criterion:** Evaluates forecast accuracy (MAPE, RMSE, MAE) and replenishment policy parity (Average ROP, EOQ, Safety Stock). Any subgroup experiencing relative MAPE degradation $> 25\%$ compared to the overall test baseline (36.58%) is flagged as `Requires Review`.
+- **Audit Findings:**
+  - `Toys` Category: 49.26% MAPE (+34.7% relative degradation) → **Flagged for operational review**.
+  - All 4 regions (34.7%–37.8% MAPE) and 5 stores (34.7%–39.4% MAPE) perform within nominal fairness bounds.
 
 ```bash
 # Run fairness & subgroup audit
